@@ -580,7 +580,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             <main class="hero">
                 <div class="glass-card" style="max-width: 600px;">
                     <div class="badge-status">Registro de Credenciales Criptográficas</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Nuevo Registro Blindado</h2>
+                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Nuevo Registro </h2>
                     <form action="?view=register" method="POST">
                         <input type="hidden" name="action" value="register">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
@@ -603,7 +603,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div class="form-group">
                             <label>Tipo de Hash para el Perfil</label>
                             <select name="hash_type" class="form-control">
-                                <option value="sha256">SHA-256 (Recomendado)</option>
+                                <option value="sha256">SHA-256 </option>
                                 <option value="whirlpool">Whirlpool</option>
                                 <option value="md5">MD5</option>
                             </select>
@@ -790,7 +790,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <div class="form-group">
                                 <label>Subir Foto de Perfil (Moderno)</label>
                                 <div class="file-upload-wrapper">
-                                    <span class="file-upload-text" id="fileNameLabel">📂 Seleccionar imagen en alta definición...</span>
+                                    <span class="file-upload-text" id="fileNameLabel"> Seleccionar imagen en alta definición </span>
                                     <input type="file" name="profile_pic" accept="image/png, image/jpeg, image/webp" onchange="document.getElementById('fileNameLabel').innerText = '✓ ' + this.files[0].name;">
                                 </div>
                             </div>
