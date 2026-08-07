@@ -1,4 +1,9 @@
 <?php
+// ====================================================================
+// INCLUSIÓN DEL MÓDULO DE NOTIFICACIONES SMTP / AUDITORÍA DE SEGURIDAD
+// ====================================================================
+require_once __DIR__ . '/mailer_integration.php';
+
 // --- CONFIGURACIÓN DE SESIÓN Y SEGURIDAD ROBUSTA (HTTPOnly, Secure, Strict Mode) ---
 if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_httponly', 1);
@@ -157,6 +162,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2, sec_question_3, sec_answer_3) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash, $hash_type, $sec_q1, $sec_a1, $sec_q2, $sec_a2, $sec_q3, $sec_a3]);
 
+            // [!] DISPARADOR DE CORREO Y AUDITORÍA: REGISTRO EXITOSO
+            registrarYNotificarEvento($db, null, $email, $nombre, 'REGISTRO DE USUARIO', 'Cuenta creada exitosamente con token criptográfico.');
+
             $_SESSION['temp_new_hash'] = $single_use_hash;
             header("Location: ?view=login&registered=1");
             exit;
@@ -194,6 +202,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['user_email'] = $user['email'];
                     $_SESSION['user_nombre'] = $user['nombre'];
                     
+                    // [!] DISPARADOR DE CORREO Y AUDITORÍA: INICIO DE SESIÓN EXITOSO
+                    registrarYNotificarEvento($db, $user['id'], $user['email'], $user['nombre'], 'INICIO DE SESIÓN', 'Acceso autenticado correctamente desde IP: ' . $client_ip);
+
                     header("Location: ?view=profile");
                     exit;
                 }
@@ -246,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($new_pass)) {
             $hashed_pass = password_hash($new_pass, PASSWORD_BCRYPT);
             
-            $stmt_u = $db->prepare("SELECT hash_type FROM users WHERE id = ?");
+            $stmt_u = $db->prepare("SELECT email, nombre, hash_type FROM users WHERE id = ?");
             $stmt_u->execute([$rec_user_id]);
             $u_data = $stmt_u->fetch(PDO::FETCH_ASSOC);
             $htype = $u_data['hash_type'] ?? 'sha256';
@@ -262,6 +273,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $stmt_update = $db->prepare("UPDATE users SET password = ?, single_use_hash = ?, hash_used = 0 WHERE id = ?");
             $stmt_update->execute([$hashed_pass, $new_hash, $rec_user_id]);
+
+            // [!] DISPARADOR DE CORREO Y AUDITORÍA: RESTABLECIMIENTO DE CONTRASEÑA
+            registrarYNotificarEvento($db, $rec_user_id, $u_data['email'] ?? 'usuario@sistema', $u_data['nombre'] ?? 'Usuario', 'RESTABLECIMIENTO DE CONTRASEÑA', 'Se ha actualizado la contraseña de acceso y regenerado el token criptográfico.');
 
             unset($_SESSION['recovery_user_id']);
             $message = "Contraseña restablecida exitosamente. Se ha generado un nuevo hash para tu perfil. Inicia sesión.";
@@ -333,7 +347,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $stmt_old = $db->prepare("SELECT profile_pic FROM users WHERE id = ?");
+        $stmt_old = $db->prepare("SELECT email, profile_pic FROM users WHERE id = ?");
         $stmt_old->execute([$user_id]);
         $old_data = $stmt_old->fetch(PDO::FETCH_ASSOC);
         if (!$profile_pic_path) {
@@ -376,6 +390,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute($params);
         }
 
+        // [!] DISPARADOR DE CORREO Y AUDITORÍA: ACTUALIZACIÓN DE PERFIL
+        registrarYNotificarEvento($db, $user_id, $old_data['email'], $new_nombre, 'ACTUALIZACIÓN DE PERFIL', 'Se modificaron datos del perfil o capas de seguridad.');
+
         $_SESSION['user_nombre'] = $new_nombre;
         $message = "Perfil y capas de seguridad actualizadas de forma exitosa.";
         $message_type = "success";
@@ -397,6 +414,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, ip_address) VALUES (?, ?, ?, ?, ?)");
                 $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $client_ip]);
                 
+                // [!] DISPARADOR DE CORREO Y AUDITORÍA: CONSULTA DE CIBERSEGURIDAD
+                registrarYNotificarEvento($db, $c_uid, $c_email, $_SESSION['user_nombre'] ?? 'Visitante', 'CONSULTA DE CIBERSEGURIDAD', 'Asunto: ' . $c_subject);
+
                 register_failed_attempt('consultation'); // Aplica límite de intentos por intervalo
                 $message = "Consulta de ciberseguridad enviada y protegida con éxito contra flood/DDoS.";
                 $message_type = "success";
@@ -578,6 +598,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
         <?php elseif ($action == 'register'): ?>
             <main class="hero">
+                <!-- (Continúa tu HTML del resto del sistema normalmente) -->
                 <div class="glass-card" style="max-width: 600px;">
                     <div class="badge-status">Registro de Credenciales Criptográficas</div>
                     <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Nuevo Registro </h2>
