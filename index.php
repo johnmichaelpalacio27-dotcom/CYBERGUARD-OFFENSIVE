@@ -48,6 +48,7 @@ try {
 $message = '';
 $message_type = '';
 $action = isset($_GET['view']) ? $_GET['view'] : 'home';
+$registered_hash_display = ''; // Variable para mostrar el hash solo al registrarse
 
 // --- PROCESAMIENTO DE ACCIONES BACKEND & PROTECCIÓN IDOR/CSRF ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -70,6 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_used, hash_security_active) VALUES (?, ?, ?, ?, ?, 0, 1)");
             $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash]);
+
+            // Guardamos temporalmente el hash en sesión para mostrarlo al usuario justo después del registro
+            $_SESSION['temp_new_hash'] = $single_use_hash;
 
             header("Location: ?view=login&registered=1");
             exit;
@@ -311,7 +315,7 @@ if (isset($_SESSION['user_id'])) {
 
     <div class="ui-layer">
         <header>
-            <a href="?view=home" class="logo transition-link">CYBERGUARD//HARDENED</a>
+            <a href="?view=home" class="logo transition-link">CYBERGUARD//OFFENSIVE</a>
             <nav>
                 <a href="?view=about" class="transition-link">Nosotros</a>
                 <?php if (isset($_SESSION['user_id'])): ?>
@@ -387,7 +391,9 @@ if (isset($_SESSION['user_id'])) {
                     
                     <?php if (isset($_GET['registered'])): ?>
                         <div class="alert alert-success">
-                            ¡Cuenta creada exitosamente! Tu Hash de un solo uso ha sido generado. Visualízalo al ingresar.
+                            ¡Cuenta creada exitosamente! Tu Hash de registro único es:<br>
+                            <div class="hash-display"><?php echo htmlspecialchars($_SESSION['temp_new_hash'] ?? ''); ?></div>
+                            <span style="font-size: 0.8rem; display: block; margin-top: 5px;">Cópialo ahora. Al usarlo para ingresar quedará invalidado y podrás cambiarlo luego desde tu perfil.</span>
                         </div>
                     <?php endif; ?>
 
@@ -403,8 +409,8 @@ if (isset($_SESSION['user_id'])) {
                             <input type="password" name="password" class="form-control" required autocomplete="current-password">
                         </div>
                         <div class="form-group">
-                            <label style="color: #eab308;">Hash Único de Seguridad de tu Cuenta</label>
-                            <input type="text" name="login_hash" class="form-control" placeholder="Ingresa tu hash activo (si tienes la capa activa)" autocomplete="off">
+                            <label style="color: #eab308;">Hash de Seguridad Activo</label>
+                            <input type="text" name="login_hash" class="form-control" placeholder="" autocomplete="off">
                         </div>
                         <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Entrar al Sistema</button>
                     </form>
@@ -426,7 +432,7 @@ if (isset($_SESSION['user_id'])) {
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <div class="form-group">
                             <label style="color: #eab308;">Hash de Perfil Activo</label>
-                            <input type="text" name="recovery_hash" class="form-control" placeholder="Pegue aquí el hash exacto de su perfil" required autocomplete="off">
+                            <input type="text" name="recovery_hash" class="form-control" placeholder="" required autocomplete="off">
                         </div>
                         <button type="submit" class="btn btn-warning" style="width:100%; margin-top:1rem;">Validar Hash y Acceder</button>
                     </form>
@@ -511,117 +517,85 @@ if (isset($_SESSION['user_id'])) {
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label>Correo Electrónico (Blindado / No Modificable)</label>
-                                <input type="email" class="form-control" value="<?php echo htmlspecialchars($current_user['email']); ?>" disabled>
+                                <label>Nueva Contraseña (Dejar en blanco para no cambiar)</label>
+                                <input type="password" name="password" class="form-control" autocomplete="new-password">
                             </div>
                             <div class="form-group">
-                                <label>Nueva Contraseña (Opcional)</label>
-                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener actual" autocomplete="new-password">
+                                <label>Foto de Perfil (JPG, PNG, WEBP)</label>
+                                <input type="file" name="profile_pic" class="form-control" accept="image/*">
                             </div>
-                            <div class="form-group">
-                                <label>Cambiar Fotografía de Perfil</label>
-                                <input type="file" name="profile_pic" class="form-control" accept="image/*" style="font-size: 0.8rem; padding: 0.4rem;">
-                            </div>
-                            <button type="submit" class="btn btn-primary" style="width:100%; margin-top: 1rem;">Guardar Cambios de Perfil</button>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar Cambios</button>
                         </form>
                     </div>
                 </div>
             </main>
-
-        <?php elseif ($action == 'about'): ?>
-            <main class="content-section">
-                <div class="badge-status">Sobre Nosotros & Seguridad Hash</div>
-                <h1>Arquitectura, <span>Seguridad y Equipo</span></h1>
-                <p><strong>CyberGuard Hardened</strong> es una plataforma diseñada bajo estándares exigentes de ingeniería de software y ciberseguridad defensiva.</p>
-                <p>Este sistema introduce autenticación basada en <strong>Hashes de perfil de un solo uso</strong>, capas de seguridad activables por cuenta que blindan el acceso mediante tokens criptográficos rotativos, y una interfaz inmersiva con animaciones interactivas en 3D.</p>
-                <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
-            </main>
-
-        <?php elseif ($action == 'logout'): ?>
-            <?php
-            session_unset();
-            session_destroy();
-            header("Location: ?view=home");
-            exit;
-            ?>
         <?php endif; ?>
 
         <footer>
-            <p>&copy;2026 CyberGuard Security Consulting. Todos los derechos reservados.</p>
+            <p>&copy; 2026 CyberGuard Offensive Systems. Todos los derechos reservados.</p>
         </footer>
     </div>
 
-    <!-- Script de Three.js con velocidad de rotación suave y tranquila -->
+    <!-- Three.js Background Animation Script -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        document.querySelectorAll('.transition-link').forEach(link => {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                const targetUrl = this.getAttribute('href');
-                document.body.classList.add('transitioning');
-                setTimeout(() => {
-                    window.location.href = targetUrl;
-                }, 600);
-            });
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // Geometría de partículas de seguridad cibernética
+        const particleCount = 700;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount * 3; i++) {
+            positions[i] = (Math.random() - 0.5) * 20;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const material = new THREE.PointsMaterial({
+            color: 0x06b6d4,
+            size: 0.05,
+            transparent: true,
+            opacity: 0.7
         });
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const container = document.getElementById('canvas-container');
-            if (!container) return;
+        const particles = new THREE.Points(geometry, material);
+        scene.add(particles);
 
-            const scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x030712, 0.08);
+        camera.position.z = 5;
 
-            const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 6;
+        // Animación fluida
+        function animate() {
+            requestAnimationFrame(animate);
+            particles.rotation.x += 0.0005;
+            particles.rotation.y += 0.001;
+            renderer.render(scene, camera);
+        }
+        animate();
 
-            const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setClearColor(0x000000, 0);
-            container.appendChild(renderer.domElement);
+        });
 
-            const geometry = new THREE.IcosahedronGeometry(3, 4);
-            const material = new THREE.MeshBasicMaterial({
-                color: 0x06b6d4,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.25,
-                wireframeLinewidth: 1
-            });
-
-            const sphere = new THREE.Mesh(geometry, material);
-            scene.add(sphere);
-
-            let mouseX = 0;
-            let mouseY = 0;
-            let targetRotationX = 0;
-            let targetRotationY = 0;
-
-            document.addEventListener('mousemove', (event) => {
-                mouseX = (event.clientX - window.innerWidth / 2) * 0.0002;
-                mouseY = (event.clientY - window.innerHeight / 2) * 0.0002;
-            });
-
-            function animate() {
-                requestAnimationFrame(animate);
-                sphere.rotation.y += 0.0008;
-                sphere.rotation.x += 0.0004;
-
-                targetRotationY += (mouseX - targetRotationY) * 0.02;
-                targetRotationX += (mouseY - targetRotationX) * 0.02;
-                sphere.rotation.y += targetRotationY;
-                sphere.rotation.x += targetRotationX;
-
-                renderer.render(scene, camera);
-            }
-
-            animate();
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
+        // Efecto visual de transición en enlaces
+        document.querySelectorAll('.transition-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                const href = this.getAttribute('href');
+                if(href && href.startsWith('?')) {
+                    e.preventDefault();
+                    document.body.classList.add('transitioning');
+                    setTimeout(() => {
+                        window.location.href = href;
+                    }, 800);
+                }
             });
         });
     </script>
