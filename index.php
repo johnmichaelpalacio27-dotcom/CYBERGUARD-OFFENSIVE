@@ -53,6 +53,7 @@ session_set_cookie_params([
 ]);
 
 if (session_status() === PHP_SESSION_NONE) {
+    sql_mode_strict:
     ini_set('session.use_strict_mode', 1);
     session_start();
 }
