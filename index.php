@@ -48,7 +48,6 @@ try {
 $message = '';
 $message_type = '';
 $action = isset($_GET['view']) ? $_GET['view'] : 'home';
-$registered_hash_display = ''; // Variable para mostrar el hash solo al registrarse
 
 // --- PROCESAMIENTO DE ACCIONES BACKEND & PROTECCIÓN IDOR/CSRF ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -353,6 +352,22 @@ if (isset($_SESSION['user_id'])) {
                 </div>
             </main>
 
+        <?php elseif ($action == 'about'): ?>
+            <main class="content-section" style="max-width: 800px; width: 100%;">
+                <div class="badge-status">Acerca de CyberGuard Offensive</div>
+                <h1>Ingeniería en <span>Ciberseguridad y Hardening</span></h1>
+                <p class="subtitle">CyberGuard Offensive es una plataforma de vanguardia diseñada para la gestión segura de accesos, análisis de vulnerabilidades y protección de datos mediante criptografía avanzada de un solo uso (OTP Hash estricto).</p>
+                <div class="glass-card" style="max-width: 100%; margin-top: 1.5rem;">
+                    <h3 style="font-family: 'Orbitron'; color: #06b6d4; margin-bottom: 1rem;">Nuestros Principios</h3>
+                    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1rem;">
+                        Desarrollamos arquitecturas robustas orientadas a mitigar vectores de ataque avanzados, inyecciones, ataques de fijación de sesión y suplantación de identidad mediante la implementación de tokens hash criptográficos y aislamiento estricto de capas.
+                    </p>
+                    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6;">
+                        Nuestro equipo de analistas y programadores mantiene un compromiso constante con la integridad, confidencialidad y disponibilidad de la información en entornos web altamente exigentes.
+                    </p>
+                </div>
+            </main>
+
         <?php elseif ($action == 'register'): ?>
             <main class="hero">
                 <div class="glass-card">
@@ -536,7 +551,7 @@ if (isset($_SESSION['user_id'])) {
         </footer>
     </div>
 
-    <!-- Three.js Background Animation Script -->
+    <!-- Three.js Background Animation Script (Esfera Giratoria de Partículas) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const container = document.getElementById('canvas-container');
@@ -547,34 +562,44 @@ if (isset($_SESSION['user_id'])) {
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // Geometría de partículas de seguridad cibernética
-        const particleCount = 700;
+        // Geometría de esfera de partículas cibernéticas
+        const particleCount = 1200;
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
 
-        for (let i = 0; i < particleCount * 3; i++) {
-            positions[i] = (Math.random() - 0.5) * 20;
+        const radius = 2.5;
+        for (let i = 0; i < particleCount; i++) {
+            const u = Math.random();
+            const v = Math.random();
+            const theta = u * 2.0 * Math.PI;
+            const phi = Math.acos(2.0 * v - 1.0);
+            
+            const r = radius * Math.cbrt(Math.random());
+            
+            positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+            positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+            positions[i * 3 + 2] = r * Math.cos(phi);
         }
 
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
         const material = new THREE.PointsMaterial({
             color: 0x06b6d4,
-            size: 0.05,
+            size: 0.04,
             transparent: true,
-            opacity: 0.7
+            opacity: 0.8
         });
 
-        const particles = new THREE.Points(geometry, material);
-        scene.add(particles);
+        const sphereParticles = new THREE.Points(geometry, material);
+        scene.add(sphereParticles);
 
-        camera.position.z = 5;
+        camera.position.z = 6;
 
-        // Animación fluida
+        // Animación de rotación fluida de la esfera
         function animate() {
             requestAnimationFrame(animate);
-            particles.rotation.x += 0.0005;
-            particles.rotation.y += 0.001;
+            sphereParticles.rotation.x += 0.001;
+            sphereParticles.rotation.y += 0.002;
             renderer.render(scene, camera);
         }
         animate();
