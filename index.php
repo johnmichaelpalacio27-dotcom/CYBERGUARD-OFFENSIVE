@@ -246,6 +246,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// Manejo explícito de Cierre de Sesión (Logout) redirigiendo a inicio
+if ($action === 'logout') {
+    $_SESSION = array();
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    session_destroy();
+    header("Location: ?view=home");
+    exit;
+}
+
 // Obtener datos globales del usuario autenticado de forma segura
 $logged_user = null;
 if (isset($_SESSION['user_id'])) {
@@ -458,7 +473,7 @@ if (isset($_SESSION['user_id'])) {
         <?php elseif ($action == 'profile'): ?>
             <?php
             if (!isset($_SESSION['user_id'])) {
-                header("Location: ?view=login");
+                header("Location: ?view=home");
                 exit;
             }
             $stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
@@ -512,7 +527,7 @@ if (isset($_SESSION['user_id'])) {
                             </button>
                         </form>
 
-                        <a href="?view=logout" class="btn btn-danger" style="width: 100%; padding: 0.6rem; font-size: 0.85rem;">Cerrar Sesión</a>
+                        <a href="?view=logout" class="btn btn-danger transition-link" style="width: 100%; padding: 0.6rem; font-size: 0.85rem;">Cerrar Sesión</a>
                     </div>
 
                     <!-- Formulario de Actualización en 3D -->
