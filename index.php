@@ -26,7 +26,7 @@ try {
     $db = new PDO('sqlite:' . $db_file);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Inicializar tablas necesarias con campos de seguridad de Hash Avanzado y Activación de Capas
+    // Inicializar tablas necesarias con campos actualizados para Hash, Preguntas de Seguridad y Personalización
     $db->exec("CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
@@ -34,9 +34,15 @@ try {
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         single_use_hash TEXT DEFAULT '',
+        hash_type TEXT DEFAULT 'sha256',
         hash_used INTEGER DEFAULT 0,
         hash_security_active INTEGER DEFAULT 1,
         profile_pic TEXT DEFAULT '',
+        theme_color TEXT DEFAULT '#06b6d4',
+        sec_question_1 TEXT DEFAULT '',
+        sec_answer_1 TEXT DEFAULT '',
+        sec_question_2 TEXT DEFAULT '',
+        sec_answer_2 TEXT DEFAULT '',
         role TEXT DEFAULT 'analyst',
         status TEXT DEFAULT 'active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -64,14 +70,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = trim($_POST['email']);
         $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
         
-        // Generar Hash criptográfico real de un solo uso
-        $single_use_hash = bin2hex(random_bytes(32));
+        $hash_type = $_POST['hash_type'] ?? 'sha256';
+        $raw_hash_data = random_bytes(32);
+        if ($hash_type === 'whirlpool') {
+            $single_use_hash = hash('whirlpool', $raw_hash_data);
+        } elseif ($hash_type === 'md5') {
+            $single_use_hash = md5($raw_hash_data);
+        } else {
+            $single_use_hash = hash('sha256', $raw_hash_data);
+        }
+
+        $sec_q1 = trim($_POST['sec_question_1']);
+        $sec_a1 = password_hash(trim($_POST['sec_answer_1']), PASSWORD_BCRYPT);
+        $sec_q2 = trim($_POST['sec_question_2']);
+        $sec_a2 = password_hash(trim($_POST['sec_answer_2']), PASSWORD_BCRYPT);
 
         try {
-            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_used, hash_security_active) VALUES (?, ?, ?, ?, ?, 0, 1)");
-            $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash]);
+            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)");
+            $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash, $hash_type, $sec_q1, $sec_a1, $sec_q2, $sec_a2]);
 
-            // Guardamos temporalmente el hash en sesión para mostrarlo al usuario justo después del registro
             $_SESSION['temp_new_hash'] = $single_use_hash;
 
             header("Location: ?view=login&registered=1");
@@ -85,38 +102,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($form_action === 'login') {
         $login_id = trim($_POST['login_id']);
         $password = $_POST['password'];
-        $login_hash = trim($_POST['login_hash'] ?? '');
+        $answer_1 = trim($_POST['sec_answer_1'] ?? '');
 
         $stmt = $db->prepare("SELECT * FROM users WHERE email = ?");
         $stmt->execute([$login_id]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($user && password_verify($password, $user['password'])) {
-            
-            // Verificar si la capa de seguridad de Hash está activada en la cuenta
-            if ($user['hash_security_active'] == 1) {
-                // El hash ingresado DEBE coincidir con el hash actual del usuario y NO haber sido usado
-                if (empty($login_hash) || $login_hash !== $user['single_use_hash'] || $user['hash_used'] == 1) {
-                    $message = "Acceso denegado: El Hash de seguridad único es inválido, ya fue consumido o no corresponde a esta cuenta.";
-                    $message_type = "error";
-                    $action = 'login';
-                } else {
-                    // Consumir/Invalidar el hash inmediatamente para que no sirva más (One-Time Use estricto)
-                    $stmt_invalidate = $db->prepare("UPDATE users SET hash_used = 1 WHERE id = ?");
-                    $stmt_invalidate->execute([$user['id']]);
-
-                    // Regenerar ID de sesión para prevenir Session Fixation
-                    session_regenerate_id(true);
-
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_nombre'] = $user['nombre'];
-                    
-                    header("Location: ?view=profile");
-                    exit;
-                }
+            // Validar pregunta de seguridad 1 obligatoria
+            if (!empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+                $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
+                $message_type = "error";
+                $action = 'login';
             } else {
-                // Si la capa está desactivada, entra de forma normal
                 session_regenerate_id(true);
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['user_email'] = $user['email'];
@@ -131,7 +129,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $action = 'login';
         }
     } elseif ($form_action === 'recover_hash') {
-        // Recuperar cuenta UNICAMENTE mediante el Hash único de perfil
         $recovery_hash = trim($_POST['recovery_hash']);
 
         if (empty($recovery_hash)) {
@@ -139,28 +136,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message_type = "error";
             $action = 'recover';
         } else {
-            // Buscamos estrictamente al usuario cuyo single_use_hash coincida y que NO esté marcado como usado
-            $stmt = $db->prepare("SELECT * FROM users WHERE single_use_hash = ? AND hash_used = 0");
+            $stmt = $db->prepare("SELECT * FROM users WHERE single_use_hash = ?");
             $stmt->execute([$recovery_hash]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user) {
-                // Invalida inmediatamente el hash actual para que nadie más pueda volver a usarlo
-                $stmt_burn = $db->prepare("UPDATE users SET hash_used = 1 WHERE id = ?");
-                $stmt_burn->execute([$user['id']]);
-
-                session_regenerate_id(true);
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['user_email'] = $user['email'];
-                $_SESSION['user_nombre'] = $user['nombre'];
-
-                header("Location: ?view=profile");
+                // Guardamos temporalmente el ID en sesión para el cambio obligatorio de contraseña por recuperación
+                $_SESSION['recovery_user_id'] = $user['id'];
+                header("Location: ?view=reset_password");
                 exit;
             } else {
-                $message = "El Hash ingresado es inválido, ya fue utilizado anteriormente o no pertenece a ningún perfil activo.";
+                $message = "El Hash ingresado es inválido o no pertenece a ningún perfil activo.";
                 $message_type = "error";
                 $action = 'recover';
             }
+        }
+    } elseif ($form_action === 'reset_password_new') {
+        if (!isset($_SESSION['recovery_user_id'])) {
+            header("Location: ?view=home");
+            exit;
+        }
+        $rec_user_id = $_SESSION['recovery_user_id'];
+        $new_pass = $_POST['new_password'];
+
+        if (!empty($new_pass)) {
+            $hashed_pass = password_hash($new_pass, PASSWORD_BCRYPT);
+            
+            // Generar nuevo hash automáticamente por seguridad y actualizar contraseña
+            $stmt_u = $db->prepare("SELECT hash_type FROM users WHERE id = ?");
+            $stmt_u->execute([$rec_user_id]);
+            $u_data = $stmt_u->fetch(PDO::FETCH_ASSOC);
+            $htype = $u_data['hash_type'] ?? 'sha256';
+
+            $raw_data = random_bytes(32);
+            if ($htype === 'whirlpool') {
+                $new_hash = hash('whirlpool', $raw_data);
+            } elseif ($htype === 'md5') {
+                $new_hash = md5($raw_data);
+            } else {
+                $new_hash = hash('sha256', $raw_data);
+            }
+
+            $stmt_update = $db->prepare("UPDATE users SET password = ?, single_use_hash = ?, hash_used = 0 WHERE id = ?");
+            $stmt_update->execute([$hashed_pass, $new_hash, $rec_user_id]);
+
+            unset($_SESSION['recovery_user_id']);
+            $message = "Contraseña restablecida exitosamente. Se ha generado un nuevo hash para tu perfil. Inicia sesión.";
+            $message_type = "success";
+            $action = 'login';
+        } else {
+            $message = "La contraseña no puede estar vacía.";
+            $message_type = "error";
+            $action = 'reset_password';
         }
     } elseif ($form_action === 'generate_new_hash') {
         if (!isset($_SESSION['user_id'])) {
@@ -168,32 +195,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         $user_id = $_SESSION['user_id'];
+        $desired_type = $_POST['hash_type'] ?? 'sha256';
         
-        // Generar un nuevo hash y marcar hash_used = 0, invalidando cualquier token anterior automáticamente
-        $nuevo_hash = bin2hex(random_bytes(32));
-        $stmt = $db->prepare("UPDATE users SET single_use_hash = ?, hash_used = 0 WHERE id = ?");
-        $stmt->execute([$nuevo_hash, $user_id]);
-
-        $message = "Se ha generado un nuevo Hash de seguridad único. El anterior ha quedado totalmente invalidado.";
-        $message_type = "success";
-        $action = 'profile';
-    } elseif ($form_action === 'toggle_hash_security') {
-        if (!isset($_SESSION['user_id'])) {
-            header("Location: ?view=login");
-            exit;
+        $raw_data = random_bytes(32);
+        if ($desired_type === 'whirlpool') {
+            $nuevo_hash = hash('whirlpool', $raw_data);
+        } elseif ($desired_type === 'md5') {
+            $nuevo_hash = md5($raw_data);
+        } else {
+            $nuevo_hash = hash('sha256', $raw_data);
         }
-        $user_id = $_SESSION['user_id'];
-        $current_state = intval($_POST['current_state']);
-        $new_state = ($current_state == 1) ? 0 : 1;
 
-        $stmt = $db->prepare("UPDATE users SET hash_security_active = ? WHERE id = ?");
-        $stmt->execute([$new_state, $user_id]);
+        $stmt = $db->prepare("UPDATE users SET single_use_hash = ?, hash_type = ?, hash_used = 0 WHERE id = ?");
+        $stmt->execute([$nuevo_hash, $desired_type, $user_id]);
 
-        $message = $new_state == 1 ? "Capa de seguridad de Hash activada exitosamente." : "Capa de seguridad de Hash desactivada.";
+        $message = "Se ha generado un nuevo Hash de seguridad único con el algoritmo seleccionado.";
         $message_type = "success";
         $action = 'profile';
     } elseif ($form_action === 'update_profile') {
-        // Prevención estricta de IDOR: Forzamos el ID a través de la sesión cifrada y validada, ignorando cualquier parámetro externo.
         if (!isset($_SESSION['user_id'])) {
             header("Location: ?view=login");
             exit;
@@ -203,6 +222,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $new_nombre = trim($_POST['nombre']);
         $new_apellido = trim($_POST['apellido']);
         $new_password = $_POST['password'];
+        $theme_color = trim($_POST['theme_color'] ?? '#06b6d4');
+        $q1 = trim($_POST['sec_question_1']);
+        $a1 = trim($_POST['sec_answer_1']);
+        $q2 = trim($_POST['sec_question_2']);
+        $a2 = trim($_POST['sec_answer_2']);
         
         $profile_pic_path = null;
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
@@ -229,18 +253,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $profile_pic_path = $old_data['profile_pic'];
         }
 
+        // Construir consulta dinámica para actualizar preguntas si se suministran
+        $q_update_extras = "";
+        $params_extras = [];
+
+        if (!empty($a1)) {
+            $hashed_a1 = password_hash($a1, PASSWORD_BCRYPT);
+            $q_update_extras .= ", sec_question_1 = ?, sec_answer_1 = ?";
+            $params_extras[] = $q1;
+            $params_extras[] = $hashed_a1;
+        }
+        if (!empty($a2)) {
+            $hashed_a2 = password_hash($a2, PASSWORD_BCRYPT);
+            $q_update_extras .= ", sec_question_2 = ?, sec_answer_2 = ?";
+            $params_extras[] = $q2;
+            $params_extras[] = $hashed_a2;
+        }
+
         if (!empty($new_password)) {
             $hashed_pass = password_hash($new_password, PASSWORD_BCRYPT);
-            $stmt = $db->prepare("UPDATE users SET nombre = ?, apellido = ?, password = ?, profile_pic = ? WHERE id = ?");
-            $stmt->execute([$new_nombre, $new_apellido, $hashed_pass, $profile_pic_path, $user_id]);
+            $sql = "UPDATE users SET nombre = ?, apellido = ?, password = ?, profile_pic = ?, theme_color = ?" . $q_update_extras . " WHERE id = ?";
+            $params = array_merge([$new_nombre, $new_apellido, $hashed_pass, $profile_pic_path, $theme_color], $params_extras, [$user_id]);
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
         } else {
-            $stmt = $db->prepare("UPDATE users SET nombre = ?, apellido = ?, profile_pic = ? WHERE id = ?");
-            $stmt->execute([$new_nombre, $new_apellido, $profile_pic_path, $user_id]);
+            $sql = "UPDATE users SET nombre = ?, apellido = ?, profile_pic = ?, theme_color = ?" . $q_update_extras . " WHERE id = ?";
+            $params = array_merge([$new_nombre, $new_apellido, $profile_pic_path, $theme_color], $params_extras, [$user_id]);
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
         }
 
         $_SESSION['user_nombre'] = $new_nombre;
 
-        $message = "Perfil actualizado de forma segura.";
+        $message = "Perfil y configuración actualizados de forma segura.";
         $message_type = "success";
         $action = 'profile';
     }
@@ -268,6 +313,8 @@ if (isset($_SESSION['user_id'])) {
     $stmt_nav->execute([$_SESSION['user_id']]);
     $logged_user = $stmt_nav->fetch(PDO::FETCH_ASSOC);
 }
+
+$active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -277,45 +324,43 @@ if (isset($_SESSION['user_id'])) {
     <title>CyberGuard Offensive | Seguridad & Hardening</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --theme-color: <?php echo htmlspecialchars($active_theme_color); ?>;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background-color: #030712; color: #f3f4f6; font-family: 'Inter', sans-serif; overflow-x: hidden; width: 100vw; min-height: 100vh; }
         #canvas-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; pointer-events: none; transition: transform 1.2s ease-in-out; }
         body.transitioning #canvas-container { transform: scale(1.1) rotate(180deg); filter: hue-rotate(45deg); }
         .ui-layer { position: relative; z-index: 2; width: 100%; min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 2rem 4rem; }
         header { display: flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1200px; margin: 0 auto; }
-        .logo { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 700; color: #06b6d4; letter-spacing: 2px; text-shadow: 0 0 10px rgba(6, 182, 212, 0.4); text-decoration: none; }
+        .logo { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--theme-color); letter-spacing: 2px; text-shadow: 0 0 10px rgba(6, 182, 212, 0.4); text-decoration: none; }
         nav { display: flex; align-items: center; gap: 2rem; }
         nav a { color: #9ca3af; text-decoration: none; font-size: 0.9rem; transition: color 0.3s ease; cursor: pointer; }
-        nav a:hover { color: #06b6d4; }
-        .nav-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid #06b6d4; vertical-align: middle; margin-left: 0.5rem; }
+        nav a:hover { color: var(--theme-color); }
+        .nav-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid var(--theme-color); vertical-align: middle; margin-left: 0.5rem; }
         .hero, .content-section { max-width: 800px; margin: auto 0; padding: 3rem 0; }
-        .badge-status { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); color: #06b6d4; padding: 0.4rem 1rem; border-radius: 50px; font-size: 0.8rem; font-family: 'Orbitron', sans-serif; margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; }
+        .badge-status { display: inline-block; background: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); color: var(--theme-color); padding: 0.4rem 1rem; border-radius: 50px; font-size: 0.8rem; font-family: 'Orbitron', sans-serif; margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 1px; }
         h1 { font-family: 'Orbitron', sans-serif; font-size: 3rem; line-height: 1.1; margin-bottom: 1.5rem; color: #ffffff; }
-        h1 span { color: #06b6d4; }
+        h1 span { color: var(--theme-color); }
         p.subtitle, .content-section p { font-size: 1.05rem; color: #9ca3af; line-height: 1.6; margin-bottom: 2rem; max-width: 700px; }
         
-        /* Contenedores con animación 3D sutil */
         .glass-card { background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(6, 182, 212, 0.3); padding: 2.5rem; border-radius: 12px; backdrop-filter: blur(12px); box-shadow: 0 0 30px rgba(0, 0, 0, 0.7); max-width: 500px; transform-style: preserve-3d; transition: transform 0.3s ease, box-shadow 0.3s ease; }
         .glass-card:hover { transform: perspective(1000px) rotateX(2deg) rotateY(-2deg) translateZ(10px); box-shadow: 0 10px 40px rgba(6, 182, 212, 0.2); }
         
         .form-group { margin-bottom: 1.2rem; transform: translateZ(15px); }
-        .form-group label { display: block; font-size: 0.85rem; color: #06b6d4; font-family: 'Orbitron', sans-serif; margin-bottom: 0.5rem; }
+        .form-group label { display: block; font-size: 0.85rem; color: var(--theme-color); font-family: 'Orbitron', sans-serif; margin-bottom: 0.5rem; }
         .form-control { width: 100%; padding: 0.8rem 1rem; background: rgba(3, 7, 18, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #fff; font-size: 0.95rem; }
-        .form-control:focus { outline: none; border-color: #06b6d4; box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
-        .form-control:disabled { background: rgba(255,255,255,0.05); color: #6b7280; cursor: not-allowed; }
+        .form-control:focus { outline: none; border-color: var(--theme-color); box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
         .cta-group { display: flex; gap: 1rem; flex-wrap: wrap; }
         .btn { padding: 0.9rem 2rem; border-radius: 6px; font-weight: 600; text-decoration: none; transition: all 0.3s ease; cursor: pointer; font-size: 0.95rem; display: inline-block; text-align: center; }
-        .btn-primary { background-color: #06b6d4; color: #030712; border: none; box-shadow: 0 0 20px rgba(6, 182, 212, 0.3); }
-        .btn-primary:hover { background-color: #0891b2; box-shadow: 0 0 30px rgba(6, 182, 212, 0.6); }
+        .btn-primary { background-color: var(--theme-color); color: #030712; border: none; box-shadow: 0 0 20px rgba(6, 182, 212, 0.3); }
+        .btn-primary:hover { filter: brightness(1.2); box-shadow: 0 0 30px rgba(6, 182, 212, 0.6); }
         .btn-outline { background: transparent; color: #f3f4f6; border: 1px solid rgba(255, 255, 255, 0.2); }
-        .btn-outline:hover { border-color: #06b6d4; color: #06b6d4; }
-        .btn-danger { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.4); }
+        .btn-outline:hover { border-color: var(--theme-color); color: var(--theme-color); }
         .btn-warning { background: rgba(234, 179, 8, 0.2); border: 1px solid #eab308; color: #fde047; }
-        .btn-warning:hover { background: rgba(234, 179, 8, 0.4); }
         .link-sub { display: block; margin-top: 1rem; color: #9ca3af; font-size: 0.85rem; text-decoration: none; }
-        .link-sub:hover { color: #06b6d4; }
-        .hash-display { background: rgba(3, 7, 18, 0.95); border: 1px dashed #06b6d4; padding: 0.7rem; font-family: monospace; font-size: 0.8rem; color: #06b6d4; word-break: break-all; border-radius: 4px; margin-top: 0.3rem; }
+        .link-sub:hover { color: var(--theme-color); }
+        .hash-display { background: rgba(3, 7, 18, 0.95); border: 1px dashed var(--theme-color); padding: 0.7rem; font-family: monospace; font-size: 0.8rem; color: var(--theme-color); word-break: break-all; border-radius: 4px; margin-top: 0.3rem; }
         .alert { padding: 1rem; margin-bottom: 1.5rem; border-radius: 6px; font-size: 0.9rem; }
         .alert-error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; }
         .alert-success { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #a7f3d0; }
@@ -333,7 +378,7 @@ if (isset($_SESSION['user_id'])) {
             <nav>
                 <a href="?view=about" class="transition-link">Nosotros</a>
                 <?php if (isset($_SESSION['user_id'])): ?>
-                    <a href="?view=profile" class="transition-link" style="color: #06b6d4; font-weight: 600; display: flex; align-items: center;">
+                    <a href="?view=profile" class="transition-link" style="color: var(--theme-color); font-weight: 600; display: flex; align-items: center;">
                         Mi Perfil Blindado
                         <?php if (!empty($logged_user['profile_pic']) && file_exists(__DIR__ . '/' . $logged_user['profile_pic'])): ?>
                             <img src="<?php echo htmlspecialchars($logged_user['profile_pic']); ?>" class="nav-avatar" alt="Avatar">
@@ -341,7 +386,7 @@ if (isset($_SESSION['user_id'])) {
                     </a>
                     <a href="?view=logout" class="transition-link" style="color: #ef4444;">Salir</a>
                 <?php else: ?>
-                    <a href="?view=login" class="transition-link" style="color: #06b6d4; font-weight: 600;">Iniciar Sesión</a>
+                    <a href="?view=login" class="transition-link" style="color: var(--theme-color); font-weight: 600;">Iniciar Sesión</a>
                     <a href="?view=recover" class="transition-link" style="color: #eab308; font-weight: 600;">Recuperar por Hash</a>
                 <?php endif; ?>
             </nav>
@@ -357,9 +402,9 @@ if (isset($_SESSION['user_id'])) {
 
         <?php if ($action == 'home'): ?>
             <main class="hero">
-                <div class="badge-status">Sistema de Autenticación Criptográfica Avanzada con Hash</div>
+                <div class="badge-status">Sistema de Autenticación Criptográfica Avanzada</div>
                 <h1>Arquitectura de Acceso <span>Blindado 3D</span></h1>
-                <p class="subtitle">Plataforma protegida con tokens de un solo uso (OTP Hash estricto), capas de seguridad activables por cuenta, recuperación exclusiva por hash de perfil y efectos visuales interactivos en 3D.</p>
+                <p class="subtitle">Plataforma protegida con tokens criptográficos de perfil, preguntas de seguridad avanzadas y panel de personalización cromática dinámica en 3D.</p>
                 <div class="cta-group">
                     <a href="?view=register" class="btn btn-primary transition-link">Crear Cuenta Segura</a>
                     <a href="?view=login" class="btn btn-outline transition-link">Acceder al Sistema</a>
@@ -371,21 +416,12 @@ if (isset($_SESSION['user_id'])) {
             <main class="content-section" style="max-width: 800px; width: 100%;">
                 <div class="badge-status">Acerca de CyberGuard Offensive</div>
                 <h1>Ingeniería en <span>Ciberseguridad y Hardening</span></h1>
-                <p class="subtitle">CyberGuard Offensive es una plataforma de vanguardia diseñada para la gestión segura de accesos, análisis de vulnerabilidades y protección de datos mediante criptografía avanzada de un solo uso (OTP Hash estricto).</p>
-                <div class="glass-card" style="max-width: 100%; margin-top: 1.5rem;">
-                    <h3 style="font-family: 'Orbitron'; color: #06b6d4; margin-bottom: 1rem;">Nuestros Principios</h3>
-                    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1rem;">
-                        Desarrollamos arquitecturas robustas orientadas a mitigar vectores de ataque avanzados, inyecciones, ataques de fijación de sesión y suplantación de identidad mediante la implementación de tokens hash criptográficos y aislamiento estricto de capas.
-                    </p>
-                    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6;">
-                        Nuestro equipo de analistas y programadores mantiene un compromiso constante con la integridad, confidencialidad y disponibilidad de la información en entornos web altamente exigentes.
-                    </p>
-                </div>
+                <p class="subtitle">CyberGuard Offensive es una plataforma de vanguardia diseñada para la gestión segura de accesos, análisis de vulnerabilidades y protección de datos con múltiples capas criptográficas.</p>
             </main>
 
         <?php elseif ($action == 'register'): ?>
             <main class="hero">
-                <div class="glass-card">
+                <div class="glass-card" style="max-width: 600px;">
                     <div class="badge-status">Registro de Credenciales</div>
                     <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Nuevo Registro</h2>
                     <form action="?view=register" method="POST">
@@ -407,7 +443,27 @@ if (isset($_SESSION['user_id'])) {
                             <label>Contraseña</label>
                             <input type="password" name="password" class="form-control" required autocomplete="new-password">
                         </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Registrar y Generar Hash Único</button>
+                        <div class="form-group">
+                            <label>Tipo de Hash para el Perfil</label>
+                            <select name="hash_type" class="form-control">
+                                <option value="sha256">SHA-256 (Recomendado)</option>
+                                <option value="whirlpool">Whirlpool</option>
+                                <option value="md5">MD5</option>
+                            </select>
+                        </div>
+                        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;">
+                        <h4 style="font-family:'Orbitron'; font-size: 1rem; color: var(--theme-color); margin-bottom: 1rem;">Preguntas de Seguridad</h4>
+                        <div class="form-group">
+                            <label>Pregunta 1: ¿Cuál es el nombre de tu primera mascota?</label>
+                            <input type="text" name="sec_question_1" value="¿Cuál es el nombre de tu primera mascota?" class="form-control" readonly>
+                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Tu respuesta secreta" required style="margin-top: 5px;">
+                        </div>
+                        <div class="form-group">
+                            <label>Pregunta 2: ¿En qué ciudad naciste?</label>
+                            <input type="text" name="sec_question_2" value="¿En qué ciudad naciste?" class="form-control" readonly>
+                            <input type="text" name="sec_answer_2" class="form-control" placeholder="Tu respuesta secreta" required style="margin-top: 5px;">
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Registrar Cuenta y Generar Hash</button>
                     </form>
                     <a href="?view=login" class="link-sub transition-link">¿Ya tienes cuenta? Inicia sesión</a>
                 </div>
@@ -416,14 +472,14 @@ if (isset($_SESSION['user_id'])) {
         <?php elseif ($action == 'login'): ?>
             <main class="hero">
                 <div class="glass-card">
-                    <div class="badge-status">Autenticación de Acceso con Hash</div>
+                    <div class="badge-status">Autenticación de Acceso</div>
                     <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Iniciar Sesión</h2>
                     
                     <?php if (isset($_GET['registered'])): ?>
                         <div class="alert alert-success">
-                            ¡Cuenta creada exitosamente! Tu Hash de registro único es:<br>
+                            ¡Cuenta creada exitosamente! Tu Hash de perfil único es:<br>
                             <div class="hash-display"><?php echo htmlspecialchars($_SESSION['temp_new_hash'] ?? ''); ?></div>
-                            <span style="font-size: 0.8rem; display: block; margin-top: 5px;">Cópialo ahora. Al usarlo para ingresar quedará invalidado y podrás cambiarlo luego desde tu perfil.</span>
+                            <span style="font-size: 0.8rem; display: block; margin-top: 5px;">Guárdalo en un lugar seguro. Solo te servirá para recuperar el acceso a tu cuenta si olvidas tus credenciales.</span>
                         </div>
                     <?php endif; ?>
 
@@ -439,14 +495,14 @@ if (isset($_SESSION['user_id'])) {
                             <input type="password" name="password" class="form-control" required autocomplete="current-password">
                         </div>
                         <div class="form-group">
-                            <label style="color: #eab308;">Hash de Seguridad Activo</label>
-                            <input type="text" name="login_hash" class="form-control" placeholder="" autocomplete="off">
+                            <label style="color: #eab308;">Pregunta de Seguridad 1: ¿Cuál es el nombre de tu primera mascota?</label>
+                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta" required autocomplete="off">
                         </div>
                         <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Entrar al Sistema</button>
                     </form>
                     <div style="display: flex; justify-content: space-between; margin-top: 1rem;">
                         <a href="?view=register" class="link-sub transition-link">Registrarse</a>
-                        <a href="?view=recover" class="link-sub transition-link" style="color: #eab308;">¿Olvidaste tu acceso? Recuperar por Hash</a>
+                        <a href="?view=recover" class="link-sub transition-link" style="color: #eab308;">Recuperar por Hash</a>
                     </div>
                 </div>
             </main>
@@ -455,8 +511,8 @@ if (isset($_SESSION['user_id'])) {
             <main class="hero">
                 <div class="glass-card" style="border-color: rgba(234, 179, 8, 0.4);">
                     <div class="badge-status" style="color: #eab308; background: rgba(234, 179, 8, 0.1); border-color: rgba(234, 179, 8, 0.3);">Recuperación Exclusiva por Hash</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Acceso mediante Hash</h2>
-                    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Ingrese el Hash único correspondiente a su perfil. Al usarlo, se le otorgará acceso inmediato a su cuenta y el hash quedará invalidado permanentemente por seguridad.</p>
+                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Restablecer con Hash</h2>
+                    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Ingrese el Hash único correspondiente a su perfil para validar su identidad y asignar una nueva contraseña.</p>
                     <form action="?view=recover" method="POST">
                         <input type="hidden" name="action" value="recover_hash">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
@@ -464,9 +520,26 @@ if (isset($_SESSION['user_id'])) {
                             <label style="color: #eab308;">Hash de Perfil Activo</label>
                             <input type="text" name="recovery_hash" class="form-control" placeholder="" required autocomplete="off">
                         </div>
-                        <button type="submit" class="btn btn-warning" style="width:100%; margin-top:1rem;">Validar Hash y Acceder</button>
+                        <button type="submit" class="btn btn-warning" style="width:100%; margin-top:1rem;">Validar Hash de Perfil</button>
                     </form>
                     <a href="?view=login" class="link-sub transition-link">Volver al login estándar</a>
+                </div>
+            </main>
+
+        <?php elseif ($action == 'reset_password'): ?>
+            <main class="hero">
+                <div class="glass-card" style="border-color: rgba(16, 185, 129, 0.4);">
+                    <div class="badge-status" style="color: #10b981; background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.3);">Seguridad Verificada</div>
+                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Nueva Contraseña</h2>
+                    <form action="?view=reset_password" method="POST">
+                        <input type="hidden" name="action" value="reset_password_new">
+                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                        <div class="form-group">
+                            <label style="color: #10b981;">Ingrese su Nueva Contraseña</label>
+                            <input type="password" name="new_password" class="form-control" required autocomplete="new-password">
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Actualizar Credenciales</button>
+                    </form>
                 </div>
             </main>
 
@@ -480,81 +553,84 @@ if (isset($_SESSION['user_id'])) {
             $stmt->execute([$_SESSION['user_id']]);
             $current_user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Mostrar el hash actual del usuario si existe
             $active_hash = $current_user['single_use_hash'];
-            if (empty($active_hash)) {
-                $active_hash = "No hay hash generado actualmente.";
-            }
             ?>
             <main class="content-section" style="max-width: 950px; width: 100%;">
-                <div class="badge-status">Panel de Perfil con Movimiento 3D</div>
-                <h1 style="font-size: 2.2rem;">Gestión de <span>Perfil Avanzado</span></h1>
+                <div class="badge-status">Panel de Perfil Avanzado</div>
+                <h1 style="font-size: 2.2rem;">Gestión de <span>Perfil y Seguridad</span></h1>
                 
                 <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem; align-items: start;">
-                    <!-- Tarjeta Visual de Perfil en 3D -->
                     <div class="glass-card" style="text-align: center; max-width: 100%;">
-                        <div style="width: 120px; height: 120px; border-radius: 50%; background: #06b6d4; margin: 0 auto 1rem; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #030712; font-family: 'Orbitron'; font-weight: bold; overflow: hidden; border: 3px solid #06b6d4; box-shadow: 0 0 15px rgba(6,182,212,0.5);">
+                        <div style="width: 120px; height: 120px; border-radius: 50%; background: var(--theme-color); margin: 0 auto 1rem; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #030712; font-family: 'Orbitron'; font-weight: bold; overflow: hidden; border: 3px solid var(--theme-color); box-shadow: 0 0 15px rgba(6,182,212,0.5);">
                             <?php if (!empty($current_user['profile_pic']) && file_exists(__DIR__ . '/' . $current_user['profile_pic'])): ?>
-                                <img src="<?php echo htmlspecialchars($current_user['profile_pic']); ?>" alt="Foto de perfil" style="width: 100%; height: 100%; object-fit: cover;">
+                                <img src="<?php echo htmlspecialchars($current_user['profile_pic']); ?>" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover;">
                             <?php else: ?>
                                 <?php echo strtoupper(substr($current_user['nombre'], 0, 1) . substr($current_user['apellido'], 0, 1)); ?>
                             <?php endif; ?>
                         </div>
                         <h3 style="color: #fff; font-size: 1.3rem; margin-bottom: 0.3rem; font-family: 'Orbitron';"><?php echo htmlspecialchars($current_user['nombre'] . ' ' . $current_user['apellido']); ?></h3>
-                        <p style="font-size: 0.85rem; color: #06b6d4; margin-bottom: 1rem;"><?php echo htmlspecialchars($current_user['email']); ?></p>
+                        <p style="font-size: 0.85rem; color: var(--theme-color); margin-bottom: 1rem;"><?php echo htmlspecialchars($current_user['email']); ?></p>
                         
-                        <!-- Panel de Control de Capas de Seguridad y Hash -->
                         <div style="text-align: left; margin-bottom: 1.5rem; background: rgba(3,7,18,0.5); padding: 10px; border-radius: 6px;">
-                            <label style="font-size: 0.75rem; color: #06b6d4; font-family: 'Orbitron';">Hash de Seguridad Único:</label>
+                            <label style="font-size: 0.75rem; color: var(--theme-color); font-family: 'Orbitron';">Hash de Recuperación (Tipo: <?php echo strtoupper($current_user['hash_type']); ?>):</label>
                             <div class="hash-display"><?php echo htmlspecialchars($active_hash); ?></div>
-                            <p style="font-size: 0.7rem; color: #9ca3af; margin-top: 5px;">Estado: <?php echo $current_user['hash_used'] == 1 ? '<span style="color:#ef4444;">Consumido / Invalidado</span>' : '<span style="color:#10b981;">Activo y Válido</span>'; ?></p>
                         </div>
 
-                        <!-- Botón para generar nuevo Hash -->
+                        <!-- Generador de nuevo Hash con selección de tipo -->
                         <form action="?view=profile" method="POST" style="margin-bottom: 0.8rem;">
                             <input type="hidden" name="action" value="generate_new_hash">
                             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <button type="submit" class="btn btn-warning" style="width: 100%; padding: 0.5rem; font-size: 0.8rem;">Generar Nuevo Hash (Invalidar Antiguo)</button>
+                            <div style="margin-bottom: 0.5rem; text-align: left;">
+                                <label style="font-size: 0.75rem; color: var(--theme-color);">Nuevo Algoritmo de Hash:</label>
+                                <select name="hash_type" class="form-control" style="font-size: 0.8rem; padding: 0.4rem;">
+                                    <option value="sha256" <?php echo $current_user['hash_type'] === 'sha256' ? 'selected' : ''; ?>>SHA-256</option>
+                                    <option value="whirlpool" <?php echo $current_user['hash_type'] === 'whirlpool' ? 'selected' : ''; ?>>Whirlpool</option>
+                                    <option value="md5" <?php echo $current_user['hash_type'] === 'md5' ? 'selected' : ''; ?>>MD5</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-warning" style="width: 100%; padding: 0.5rem; font-size: 0.8rem;">Generar Nuevo Hash de Perfil</button>
                         </form>
-
-                        <!-- Botón para activar/desactivar capa de seguridad de Hash -->
-                        <form action="?view=profile" method="POST" style="margin-bottom: 1rem;">
-                            <input type="hidden" name="action" value="toggle_hash_security">
-                            <input type="hidden" name="current_state" value="<?php echo $current_user['hash_security_active']; ?>">
-                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <button type="submit" class="btn btn-outline" style="width: 100%; padding: 0.5rem; font-size: 0.8rem; border-color: <?php echo $current_user['hash_security_active'] == 1 ? '#10b981' : '#ef4444'; ?>;">
-                                Capa Hash Login: <?php echo $current_user['hash_security_active'] == 1 ? 'ACTIVADA (ON)' : 'DESACTIVADA (OFF)'; ?>
-                            </button>
-                        </form>
-
-                        <a href="?view=logout" class="btn btn-danger transition-link" style="width: 100%; padding: 0.6rem; font-size: 0.85rem;">Cerrar Sesión</a>
                     </div>
 
-                    <!-- Formulario de Actualización en 3D -->
+                    <!-- Formulario de Actualización de Datos y Preguntas de Seguridad -->
                     <div class="glass-card" style="max-width: 100%;">
-                        <h3 style="font-family:'Orbitron'; font-size: 1.2rem; margin-bottom: 1rem; color: #fff;">Actualizar Datos Personales</h3>
+                        <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1.5rem;">Editar Perfil y Seguridad</h3>
                         <form action="?view=profile" method="POST" enctype="multipart/form-data">
                             <input type="hidden" name="action" value="update_profile">
                             <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                <div class="form-group">
-                                    <label>Nombre</label>
-                                    <input type="text" name="nombre" class="form-control" value="<?php echo htmlspecialchars($current_user['nombre']); ?>" required autocomplete="off">
-                                </div>
-                                <div class="form-group">
-                                    <label>Apellido</label>
-                                    <input type="text" name="apellido" class="form-control" value="<?php echo htmlspecialchars($current_user['apellido']); ?>" required autocomplete="off">
-                                </div>
+                            <div class="form-group">
+                                <label>Nombre</label>
+                                <input type="text" name="nombre" value="<?php echo htmlspecialchars($current_user['nombre']); ?>" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Nueva Contraseña (Dejar en blanco para no cambiar)</label>
-                                <input type="password" name="password" class="form-control" autocomplete="new-password">
+                                <label>Apellido</label>
+                                <input type="text" name="apellido" value="<?php echo htmlspecialchars($current_user['apellido']); ?>" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Foto de Perfil (JPG, PNG, WEBP)</label>
-                                <input type="file" name="profile_pic" class="form-control" accept="image/*">
+                                <label>Nueva Contraseña (Opcional)</label>
+                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener la actual">
                             </div>
-                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar Cambios</button>
+                            <div class="form-group">
+                                <label>Color de Tema Visual</label>
+                                <select name="theme_color" class="form-control">
+                                    <option value="#06b6d4" <?php echo $active_theme_color === '#06b6d4' ? 'selected' : ''; ?>>Cian Cyber (Por defecto)</option>
+                                    <option value="#10b981" <?php echo $active_theme_color === '#10b981' ? 'selected' : ''; ?>>Verde Matrix</option>
+                                    <option value="#8b5cf6" <?php echo $active_theme_color === '#8b5cf6' ? 'selected' : ''; ?>>Púrpura Hacker</option>
+                                    <option value="#f59e0b" <?php echo $active_theme_color === '#f59e0b' ? 'selected' : ''; ?>>Ámbar Táctico</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Foto de Perfil</label>
+                                <input type="file" name="profile_pic" class="form-control" accept="image/png, image/jpeg, image/webp">
+                            </div>
+                            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;">
+                            <h4 style="font-family:'Orbitron'; font-size: 0.95rem; color: var(--theme-color); margin-bottom: 1rem;">Actualizar Preguntas de Seguridad</h4>
+                            <div class="form-group">
+                                <label>Pregunta 1: ¿Cuál es el nombre de tu primera mascota?</label>
+                                <input type="text" name="sec_question_1" value="¿Cuál es el nombre de tu primera mascota?" class="form-control" readonly>
+                                <input type="text" name="sec_answer_1" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar Cambios de Perfil</button>
                         </form>
                     </div>
                 </div>
@@ -562,11 +638,11 @@ if (isset($_SESSION['user_id'])) {
         <?php endif; ?>
 
         <footer>
-            <p>&copy; 2026 CyberGuard Offensive Systems. Todos los derechos reservados.</p>
+            <p>&copy; 2026 CyberGuard Offensive. Arquitectura Criptográfica y Hardening Avanzado.</p>
         </footer>
     </div>
 
-    <!-- Three.js Background Animation Script (Esfera Giratoria de Partículas) -->
+    <!-- Three.js para la animación interactiva 3D -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const container = document.getElementById('canvas-container');
@@ -577,44 +653,24 @@ if (isset($_SESSION['user_id'])) {
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // Geometría de esfera de partículas cibernéticas
-        const particleCount = 1200;
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
+        const currentThemeColor = getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim() || '#06b6d4';
 
-        const radius = 2.5;
-        for (let i = 0; i < particleCount; i++) {
-            const u = Math.random();
-            const v = Math.random();
-            const theta = u * 2.0 * Math.PI;
-            const phi = Math.acos(2.0 * v - 1.0);
-            
-            const r = radius * Math.cbrt(Math.random());
-            
-            positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-            positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-            positions[i * 3 + 2] = r * Math.cos(phi);
-        }
-
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-        const material = new THREE.PointsMaterial({
-            color: 0x06b6d4,
-            size: 0.04,
+        const geometry = new THREE.IcosahedronGeometry(2, 2);
+        const material = new THREE.MeshBasicMaterial({ 
+            color: currentThemeColor, 
+            wireframe: true,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.25
         });
+        const sphere = new THREE.Mesh(geometry, material);
+        scene.add(sphere);
 
-        const sphereParticles = new THREE.Points(geometry, material);
-        scene.add(sphereParticles);
+        camera.position.z = 5;
 
-        camera.position.z = 6;
-
-        // Animación de rotación fluida de la esfera
         function animate() {
             requestAnimationFrame(animate);
-            sphereParticles.rotation.x += 0.001;
-            sphereParticles.rotation.y += 0.002;
+            sphere.rotation.x += 0.002;
+            sphere.rotation.y += 0.003;
             renderer.render(scene, camera);
         }
         animate();
@@ -625,11 +681,11 @@ if (isset($_SESSION['user_id'])) {
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Efecto visual de transición en enlaces
+        // Efecto de transición suave al navegar
         document.querySelectorAll('.transition-link').forEach(link => {
             link.addEventListener('click', function(e) {
                 const href = this.getAttribute('href');
-                if(href && href.startsWith('?')) {
+                if (href && href.startsWith('?')) {
                     e.preventDefault();
                     document.body.classList.add('transitioning');
                     setTimeout(() => {
