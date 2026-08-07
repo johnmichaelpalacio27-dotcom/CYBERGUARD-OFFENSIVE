@@ -773,7 +773,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                 <input type="text" name="apellido" value="<?php echo htmlspecialchars($current_user['apellido']); ?>" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Nueva Contraseña (Opcional)</label>
+                                <label>Nueva Contraseña </label>
                                 <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener la actual">
                             </div>
 
@@ -788,7 +788,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
                             <!-- Botón Subir Foto Moderno y Nítido -->
                             <div class="form-group">
-                                <label>Subir Foto de Perfil (Moderno)</label>
+                                <label>Subir Foto de Perfil </label>
                                 <div class="file-upload-wrapper">
                                     <span class="file-upload-text" id="fileNameLabel"> Seleccionar imagen en alta definición </span>
                                     <input type="file" name="profile_pic" accept="image/png, image/jpeg, image/webp" onchange="document.getElementById('fileNameLabel').innerText = '✓ ' + this.files[0].name;">
