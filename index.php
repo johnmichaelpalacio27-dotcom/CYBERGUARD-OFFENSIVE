@@ -32,7 +32,7 @@ header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload"
 
 // Content Security Policy (CSP): SIN unsafe-inline ni unsafe-eval
 // Nota: Se permiten fuentes y CDNs externas específicas necesarias para el diseño UI.
-header(Content-Security-Policy: default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline');
+header("Content-Security-Policy: default-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'");
 
 // Encabezados modernos adicionales recomendados
 header("X-Frame-Options: DENY");
