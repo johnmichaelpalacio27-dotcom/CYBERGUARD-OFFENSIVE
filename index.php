@@ -219,11 +219,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$login_id]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user && password_verify($password, $user['password'])) {
-                // Si es admin, permitimos el acceso directo o validamos si aplica
-               if ($user['role'] !== 'admin') {
-    // validación normal para analistas
-}
+           if ($user && password_verify($password, $user['password'])) {
+                // Si el usuario NO es admin, validamos su pregunta de seguridad 1
+                if ($user['role'] !== 'admin' && !empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
                     register_failed_attempt('login');
                     $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
                     $message_type = "error";
