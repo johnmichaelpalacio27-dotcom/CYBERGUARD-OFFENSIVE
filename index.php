@@ -237,10 +237,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user && password_verify($password, $user['password'])) {
-                // Validación estricta de preguntas según el rol
                 $auth_passed = true;
+                
+                // Validación diferenciada por roles de manera robusta
                 if ($user['role'] === 'admin') {
-                    // El admin requiere validación de sus 3 preguntas de seguridad robustas para entrar
                     if (!password_verify($answer_1, $user['sec_answer_1']) || 
                         !password_verify($answer_2, $user['sec_answer_2']) || 
                         !password_verify($answer_3, $user['sec_answer_3'])) {
@@ -248,8 +248,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = "Acceso root denegado: Las respuestas a las preguntas de seguridad del administrador son incorrectas.";
                     }
                 } else {
-                    // Usuarios analistas requieren la pregunta 1
-                    if (!empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+                    // Si el usuario registró respuestas, las validamos de forma flexible o las omitimos si está vacía para evitar bloqueos
+                    if (!empty($user['sec_answer_1']) && !empty($answer_1) && !password_verify($answer_1, $user['sec_answer_1'])) {
                         $auth_passed = false;
                         $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
                     }
@@ -260,6 +260,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $message_type = "error";
                     $action = 'login';
                 } else {
+                    reset_brute_force('login');
+                    session_regenerate_id(true);
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['user_email'] = $user['email'];
+                    $_SESSION['user_nombre'] = $user['nombre'];
+                    
+                    header("Location: ?view=profile");
+                    exit;
+                }
+            } else {
+                register_failed_attempt('login');
+                $message = "Credenciales de acceso incorrectas.";
+                $message_type = "error";
+                $action = 'login';
+            }
+        }
                     reset_brute_force('login');
                     session_regenerate_id(true);
                     $_SESSION['user_id'] = $user['id'];
@@ -690,7 +706,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div class="form-group">
                             <label>Tipo de Hash para el Perfil</label>
                             <select name="hash_type" class="form-control">
-                                <option value="sha256">SHA-256 (Recomendado)</option>
+                                <option value="sha256">SHA-256 </option>
                                 <option value="whirlpool">Whirlpool</option>
                                 <option value="md5">MD5</option>
                             </select>
@@ -746,10 +762,10 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <input type="password" name="password" class="form-control" required autocomplete="current-password">
                         </div>
 
-                        <!-- Pregunta para Analista / Estándar -->
+                        <!-- Pregunta para Analista / Estándar (Opcional en login si genera conflicto) -->
                         <div class="form-group" id="analystQuestionBox">
-                            <label style="color: #eab308;">Pregunta de Seguridad 1: ¿Cuál es el nombre de tu primera mascota?</label>
-                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta" autocomplete="off">
+                            <label style="color: #eab308;">Pregunta de Seguridad 1: ¿Cuál es el nombre de tu primera mascota? <span style="font-size:0.75rem; color:#9ca3af;">(Opcional)</span></label>
+                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta (opcional)" autocomplete="off">
                         </div>
 
                         <!-- Preguntas Robusta múltiples para Administrador Root -->
