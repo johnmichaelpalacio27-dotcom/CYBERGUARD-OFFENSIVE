@@ -1,4 +1,3 @@
-```php
 <?php
 // --- CONFIGURACIÓN DE SESIÓN Y SEGURIDAD ROBUSTA (HTTPOnly, Secure, Strict Mode) ---
 if (session_status() === PHP_SESSION_NONE) {
