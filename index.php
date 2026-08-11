@@ -31,7 +31,7 @@ header_remove("Server");
 header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
 
 // Content Security Policy (CSP): SIN unsafe-inline ni unsafe-eval
-// Nota: Se permiten fuentes y CDNs externas específicas necesarias para el diseño UI.
+// Nota: Se permiten fuentes y CDNs externas específicas necesarias para el diseño UI y Three.js.
 header("Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'self';");
 
 // Encabezados modernos adicionales recomendados
@@ -53,7 +53,6 @@ session_set_cookie_params([
 ]);
 
 if (session_status() === PHP_SESSION_NONE) {
-    sql_mode_strict:
     ini_set('session.use_strict_mode', 1);
     session_start();
 }
@@ -603,260 +602,297 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             </nav>
         </header>
 
-        <?php if (!empty($message)): ?>
-            <div style="max-width: 600px; margin: 1rem auto 0 auto; width: 100%;">
+        <main>
+            <?php if (!empty($message)): ?>
                 <div class="alert alert-<?php echo $message_type === 'success' ? 'success' : 'error'; ?>">
                     <?php echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); ?>
                 </div>
-            </div>
-        <?php endif; ?>
+            <?php endif; ?>
 
-        <?php if ($action == 'home'): ?>
-            <main class="hero">
-                <div class="badge-status">Sistema de Autenticación Criptográfica & Anti-DDoS</div>
-                <h1>Arquitectura de Acceso <span>Blindado 3D</span></h1>
-                <p class="subtitle">Plataforma protegida con tokens criptográficos de un solo uso, protección avanzada contra fuerza bruta y DDoS, múltiples preguntas de seguridad y cabeceras de hardening completas.</p>
-                <div class="cta-group">
-                    <a href="?view=register" class="btn btn-primary transition-link">Crear Cuenta Segura</a>
-                    <a href="?view=login" class="btn btn-outline transition-link">Acceder al Sistema</a>
-                    <a href="?view=consultation" class="btn btn-outline transition-link" style="border-color: var(--theme-color);">Consulta de Ciberseguridad</a>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'about'): ?>
-            <main class="content-section" style="max-width: 800px; width: 100%;">
-                <div class="badge-status">Acerca de CyberGuard Offensive</div>
-                <h1>Ingeniería en <span>Ciberseguridad y Hardening</span></h1>
-                <p class="subtitle">CyberGuard Offensive protege identidades digitales mediante algoritmos avanzados de hashing, control de intentos fallidos con bloqueos exponenciales, mitigación de ataques volumétricos y entornos visuales tridimensionales estrictamente blindados.</p>
-            </main>
-
-        <?php elseif ($action == 'consultation'): ?>
-            <main class="hero">
-                <div class="glass-card" style="max-width: 600px;">
-                    <div class="badge-status">Área de Consultas Protegida</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Consulta de Ciberseguridad</h2>
-                    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Envía tu consulta técnica. Este canal cuenta con mitigación DDoS activa y límites estrictos de reintentos por IP.</p>
-                    <form action="?view=consultation" method="POST">
-                        <input type="hidden" name="action" value="consultation">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label>Correo Electrónico de Contacto</label>
-                            <input type="email" name="email" class="form-control" required value="<?php echo htmlspecialchars($_SESSION['user_email'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
-                        </div>
-                        <div class="form-group">
-                            <label>Asunto del Reporte / Consulta</label>
-                            <input type="text" name="subject" class="form-control" placeholder="Ej: Auditoría de vulnerabilidad web" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Mensaje Detallado</label>
-                            <textarea name="message" class="form-control" rows="4" placeholder="Describa su consulta de seguridad..." required></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Enviar Consulta Segura</button>
-                    </form>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'register'): ?>
-            <main class="hero">
-                <div class="glass-card" style="max-width: 600px;">
-                    <div class="badge-status">Registro de Credenciales Criptográficas</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Crear Cuenta Blindada</h2>
-                    <form action="?view=register" method="POST">
-                        <input type="hidden" name="action" value="register">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label>Nombre</label>
-                            <input type="text" name="nombre" class="form-control" required maxlength="50">
-                        </div>
-                        <div class="form-group">
-                            <label>Apellido</label>
-                            <input type="text" name="apellido" class="form-control" required maxlength="50">
-                        </div>
-                        <div class="form-group">
-                            <label>Correo Electrónico</label>
-                            <input type="email" name="email" class="form-control" required maxlength="100">
-                        </div>
-                        <div class="form-group">
-                            <label>Contraseña Maestra</label>
-                            <input type="password" name="password" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Algoritmo de Hash para Resguardo</label>
-                            <select name="hash_type" class="form-control">
-                                <option value="sha256">SHA-256</option>
-                                <option value="whirlpool">Whirlpool</option>
-                                <option value="md5">MD5 (Legado)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Pregunta de Seguridad 1 (Obligatoria)</label>
-                            <input type="text" name="sec_question_1" class="form-control" placeholder="Ej: ¿Nombre de tu primera mascota?" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Respuesta de Seguridad 1</label>
-                            <input type="password" name="sec_answer_1" class="form-control" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Registrar Perfil Seguro</button>
-                    </form>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'login'): ?>
-            <main class="hero">
-                <div class="glass-card" style="max-width: 500px;">
-                    <div class="badge-status">Autenticación de Acceso</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Iniciar Sesión</h2>
-                    <form action="?view=login" method="POST">
-                        <input type="hidden" name="action" value="login">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label>Correo Electrónico (ID)</label>
-                            <input type="email" name="login_id" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Contraseña</label>
-                            <input type="password" name="password" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Respuesta a Pregunta de Seguridad 1</label>
-                            <input type="password" name="sec_answer_1" class="form-control" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Validar e Ingresar</button>
-                    </form>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'recover'): ?>
-            <main class="hero">
-                <div class="glass-card" style="max-width: 500px;">
-                    <div class="badge-status">Recuperación por Hash Único</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Restablecer Credencial</h2>
-                    <form action="?view=recover" method="POST">
-                        <input type="hidden" name="action" value="recover_hash">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label>Hash de Seguridad de su Perfil</label>
-                            <input type="text" name="recovery_hash" class="form-control" placeholder="Pegue su hash único aquí..." required>
-                        </div>
-                        <button type="submit" class="btn btn-warning" style="width:100%; margin-top:1rem;">Verificar Hash Único</button>
-                    </form>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'reset_password'): ?>
-            <main class="hero">
-                <div class="glass-card" style="max-width: 500px;">
-                    <div class="badge-status">Nueva Contraseña</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff;">Establecer Nueva Contraseña</h2>
-                    <form action="?view=reset_password" method="POST">
-                        <input type="hidden" name="action" value="reset_password_new">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <div class="form-group">
-                            <label>Nueva Contraseña</label>
-                            <input type="password" name="new_password" class="form-control" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Actualizar Contraseña</button>
-                    </form>
-                </div>
-            </main>
-
-        <?php elseif ($action == 'profile' && isset($logged_user)): ?>
-            <main class="hero" style="max-width: 700px;">
-                <div class="glass-card" style="max-width: 100%;">
-                    <div class="avatar-3d-box">
-                        <?php if (!empty($logged_user['profile_pic']) && file_exists(__DIR__ . '/' . $logged_user['profile_pic'])): ?>
-                            <img src="<?php echo htmlspecialchars($logged_user['profile_pic'], ENT_QUOTES, 'UTF-8'); ?>" style="width:100%; height:100%; object-fit:cover;" alt="Avatar">
+            <?php if ($action === 'home'): ?>
+                <div class="hero">
+                    <span class="badge-status">[+] Sistema Blindado Activo</span>
+                    <h1>Seguridad Ofensiva & <span>Hardening 3D</span></h1>
+                    <p class="subtitle">Plataforma de autenticación de grado militar con mitigación anti-DDoS, protección estricta de cookies, CSP avanzada y visualización tridimensional interactiva.</p>
+                    <div class="cta-group">
+                        <?php if (!isset($_SESSION['user_id'])): ?>
+                            <a href="?view=register" class="btn btn-primary transition-link">Registrar Cuenta</a>
+                            <a href="?view=login" class="btn btn-outline transition-link">Acceder al Sistema</a>
                         <?php else: ?>
-                            <?php echo strtoupper(substr($logged_user['nombre'], 0, 1)); ?>
+                            <a href="?view=profile" class="btn btn-primary transition-link">Ir a Mi Perfil</a>
                         <?php endif; ?>
                     </div>
-                    <div class="badge-status" style="text-align:center; display:block;">Panel de Control y Hardening Personal</div>
-                    <h2 style="font-family:'Orbitron'; font-size:1.8rem; margin-bottom:1.5rem; color:#fff; text-align:center;">Hola, <?php echo htmlspecialchars($logged_user['nombre'], ENT_QUOTES, 'UTF-8'); ?></h2>
-                    
-                    <div style="margin-bottom: 1.5rem;">
-                        <label style="font-size:0.85rem; color:var(--theme-color); font-family:'Orbitron';">Hash de Recuperación Único:</label>
-                        <div class="hash-display"><?php echo htmlspecialchars($logged_user['single_use_hash'], ENT_QUOTES, 'UTF-8'); ?></div>
-                    </div>
-
-                    <form action="?view=profile" method="POST" enctype="multipart/form-data">
-                        <input type="hidden" name="action" value="update_profile">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        
-                        <div class="form-group">
-                            <label>Nombre</label>
-                            <input type="text" name="nombre" class="form-control" value="<?php echo htmlspecialchars($logged_user['nombre'], ENT_QUOTES, 'UTF-8'); ?>" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Apellido</label>
-                            <input type="text" name="apellido" class="form-control" value="<?php echo htmlspecialchars($logged_user['apellido'], ENT_QUOTES, 'UTF-8'); ?>" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Cambiar Contraseña (Opcional)</label>
-                            <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para no cambiar">
-                        </div>
-                        <div class="form-group">
-                            <label>Color de Tema Visual (Hex)</label>
-                            <input type="color" name="theme_color" class="form-control" value="<?php echo htmlspecialchars($logged_user['theme_color'], ENT_QUOTES, 'UTF-8'); ?>" style="height: 45px; cursor: pointer;">
-                        </div>
-                        <div class="form-group">
-                            <label>Imagen de Perfil</label>
-                            <div class="file-upload-wrapper">
-                                <span class="file-upload-text">Seleccionar Imagen (JPG, PNG, WEBP)</span>
-                                <input type="file" name="profile_pic" accept=".jpg,.jpeg,.png,.webp">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Guardar Cambios del Perfil</button>
-                    </form>
-
-                    <form action="?view=profile" method="POST" style="margin-top: 1rem;">
-                        <input type="hidden" name="action" value="generate_new_hash">
-                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <input type="hidden" name="hash_type" value="<?php echo htmlspecialchars($logged_user['hash_type'], ENT_QUOTES, 'UTF-8'); ?>">
-                        <button type="submit" class="btn btn-warning" style="width:100%;">Rotar Hash de Seguridad Único</button>
-                    </form>
                 </div>
-            </main>
-        <?php endif; ?>
+
+            <?php elseif ($action === 'register'): ?>
+                <div class="content-section">
+                    <div class="glass-card">
+                        <span class="badge-status">Nuevo Registro</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Crear Cuenta Blindada</h2>
+                        <form action="?view=register" method="POST">
+                            <input type="hidden" name="action" value="register">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Nombre</label>
+                                <input type="text" name="nombre" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Apellido</label>
+                                <input type="text" name="apellido" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Correo Electrónico</label>
+                                <input type="email" name="email" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Contraseña Maestra</label>
+                                <input type="password" name="password" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Algoritmo Hash de Perfil</label>
+                                <select name="hash_type" class="form-control">
+                                    <option value="sha256">SHA-256 (Estándar)</option>
+                                    <option value="whirlpool">Whirlpool (Avanzado)</option>
+                                    <option value="md5">MD5 (Legacy)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Pregunta de Seguridad 1</label>
+                                <input type="text" name="sec_question_1" class="form-control" placeholder="Ej: ¿Cuál es tu herramienta pentest favorita?">
+                            </div>
+                            <div class="form-group">
+                                <label>Respuesta de Seguridad 1</label>
+                                <input type="text" name="sec_answer_1" class="form-control">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Registrarse con Seguridad</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'login'): ?>
+                <div class="content-section">
+                    <div class="glass-card">
+                        <span class="badge-status">Autenticación Segura</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Iniciar Sesión</h2>
+                        <form action="?view=login" method="POST">
+                            <input type="hidden" name="action" value="login">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Correo Electrónico / ID</label>
+                                <input type="email" name="login_id" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Contraseña</label>
+                                <input type="password" name="password" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Respuesta de Seguridad 1 (Si aplica)</label>
+                                <input type="text" name="sec_answer_1" class="form-control">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Entrar al Sistema</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'recover'): ?>
+                <div class="content-section">
+                    <div class="glass-card">
+                        <span class="badge-status" style="color: #eab308; border-color: rgba(234, 179, 8, 0.3); background: rgba(234, 179, 8, 0.1);">Recuperación Hash</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Restablecer por Hash Único</h2>
+                        <form action="?view=recover" method="POST">
+                            <input type="hidden" name="action" value="recover_hash">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Hash Único de Seguridad</label>
+                                <input type="text" name="recovery_hash" class="form-control" placeholder="Introduce tu hash asignado" required>
+                            </div>
+                            <button type="submit" class="btn btn-warning" style="width: 100%; margin-top: 1rem;">Validar Hash de Recuperación</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'reset_password'): ?>
+                <div class="content-section">
+                    <div class="glass-card">
+                        <span class="badge-status">Nueva Contraseña</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Establecer Nueva Contraseña</h2>
+                        <form action="?view=reset_password" method="POST">
+                            <input type="hidden" name="action" value="reset_password_new">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Nueva Contraseña Maestra</label>
+                                <input type="password" name="new_password" class="form-control" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar y Regenerar Hash</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'profile' && isset($logged_user)): ?>
+                <div class="content-section">
+                    <div class="glass-card" style="max-width: 600px;">
+                        <span class="badge-status">Panel de Control</span>
+                        <div class="avatar-3d-box">
+                            <?php if (!empty($logged_user['profile_pic']) && file_exists(__DIR__ . '/' . $logged_user['profile_pic'])): ?>
+                                <img src="<?php echo htmlspecialchars($logged_user['profile_pic'], ENT_QUOTES, 'UTF-8'); ?>" style="width:100%; height:100%; object-fit:cover;" alt="Avatar">
+                            <?php else: ?>
+                                <?php echo strtoupper(substr($logged_user['nombre'], 0, 1)); ?>
+                            <?php endif; ?>
+                        </div>
+                        <h2 style="font-family: 'Orbitron'; text-align: center; margin-bottom: 1.5rem; color: #fff;"><?php echo htmlspecialchars($logged_user['nombre'] . ' ' . $logged_user['apellido'], ENT_QUOTES, 'UTF-8'); ?></h2>
+                        
+                        <form action="?view=profile" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="action" value="update_profile">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Nombre</label>
+                                <input type="text" name="nombre" class="form-control" value="<?php echo htmlspecialchars($logged_user['nombre'], ENT_QUOTES, 'UTF-8'); ?>" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Apellido</label>
+                                <input type="text" name="apellido" class="form-control" value="<?php echo htmlspecialchars($logged_user['apellido'], ENT_QUOTES, 'UTF-8'); ?>" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Cambiar Contraseña (Opcional)</label>
+                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener la actual">
+                            </div>
+                            <div class="form-group">
+                                <label>Color del Tema UI</label>
+                                <input type="color" name="theme_color" class="form-control" value="<?php echo htmlspecialchars($logged_user['theme_color'], ENT_QUOTES, 'UTF-8'); ?>" style="height: 45px; cursor: pointer;">
+                            </div>
+                            <div class="form-group">
+                                <label>Foto de Perfil (JPG, PNG, WebP)</label>
+                                <div class="file-upload-wrapper">
+                                    <span class="file-upload-text">Seleccionar Imagen 3D</span>
+                                    <input type="file" name="profile_pic">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Hash Único de Respaldo Actual (Algoritmo: <?php echo strtoupper($logged_user['hash_type']); ?>)</label>
+                                <div class="hash-display"><?php echo htmlspecialchars($logged_user['single_use_hash'], ENT_QUOTES, 'UTF-8'); ?></div>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Actualizar Perfil Blindado</button>
+                        </form>
+
+                        <form action="?view=profile" method="POST" style="margin-top: 1.5rem;">
+                            <input type="hidden" name="action" value="generate_new_hash">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            <div class="form-group">
+                                <label>Generar Nuevo Hash de Respaldo</label>
+                                <select name="hash_type" class="form-control" style="margin-bottom: 0.8rem;">
+                                    <option value="sha256">SHA-256</option>
+                                    <option value="whirlpool">Whirlpool</option>
+                                    <option value="md5">MD5</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-warning" style="width: 100%;">Generar Nuevo Hash de Un Solo Uso</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'consultation'): ?>
+                <div class="content-section">
+                    <div class="glass-card">
+                        <span class="badge-status">Soporte Técnico</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Consulta de Ciberseguridad</h2>
+                        <form action="?view=consultation" method="POST">
+                            <input type="hidden" name="action" value="consultation">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            
+                            <div class="form-group">
+                                <label>Correo Electrónico de Contacto</label>
+                                <input type="email" name="email" class="form-control" value="<?php echo isset($logged_user) ? htmlspecialchars($logged_user['email'], ENT_QUOTES, 'UTF-8') : ''; ?>" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Asunto del Reporte / Vulnerabilidad</label>
+                                <input type="text" name="subject" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Mensaje Detallado</label>
+                                <textarea name="message" class="form-control" rows="4" required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Enviar Consulta Segura</button>
+                        </form>
+                    </div>
+                </div>
+
+            <?php elseif ($action === 'about'): ?>
+                <div class="content-section">
+                    <div class="glass-card" style="max-width: 700px;">
+                        <span class="badge-status">Acerca de CyberGuard</span>
+                        <h2 style="font-family: 'Orbitron'; margin-bottom: 1.5rem; color: #fff;">Arquitectura Ofensiva & Defensiva</h2>
+                        <p>CyberGuard Offensive representa un estándar elevado en el desarrollo de aplicaciones web seguras, integrando mitigación activa contra ataques de denegación de servicio (DDoS), encriptación avanzada de credenciales con Bcrypt, y políticas de seguridad de contenido (CSP) estrictas.</p>
+                        <p style="margin-top: 1rem;">Este sistema equilibra la estética visual tridimensional interactiva con un núcleo backend blindado bajo los principios de OWASP Top 10.</p>
+                        <div style="margin-top: 2rem;">
+                            <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </main>
 
         <footer>
-            <p>CyberGuard Offensive Engine &copy; 2026. Todos los sistemas protegidos bajo normativas de hardening avanzado.</p>
+            <p>&copy; 2026 CYBERGUARD//OFFENSIVE. Todos los derechos reservados. Entorno Protegido.</p>
         </footer>
     </div>
 
-    <!-- Script visual 3D (CUMPLE CSP estricta al estar embebido de manera autónoma sin scripts inline evaluados peligrosos) -->
+    <!-- Three.js CDN integrado correctamente bajo CSP -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        document.addEventListener("DOMContentLoaded", function() {
-            const container = document.getElementById('canvas-container');
-            if(!container) return;
-            const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        // Configuración de la Esfera 3D Interactiva con Three.js
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // Geometría de la Esfera con Malla Wireframe Estilo Ciberespacio
+        const geometry = new THREE.SphereGeometry(3.5, 32, 32);
+        const material = new THREE.MeshBasicMaterial({
+            color: getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim() || '#06b6d4',
+            wireframe: true,
+            transparent: true,
+            opacity: 0.25
+        });
+        const sphere = new THREE.Mesh(geometry, material);
+        scene.add(sphere);
+
+        camera.position.z = 7;
+
+        // Animación fluida de rotación
+        function animate() {
+            requestAnimationFrame(animate);
+            sphere.rotation.x += 0.002;
+            sphere.rotation.y += 0.003;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Responsive Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            container.appendChild(renderer.domElement);
+        });
 
-            const geometry = new THREE.IcosahedronGeometry(2, 1);
-            const material = new THREE.MeshBasicMaterial({ 
-                color: getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim() || '#06b6d4', 
-                wireframe: true 
-            });
-            const sphere = new THREE.Mesh(geometry, material);
-            scene.add(sphere);
-
-            camera.position.z = 5;
-
-            function animate() {
-                requestAnimationFrame(animate);
-                sphere.rotation.x += 0.002;
-                sphere.rotation.y += 0.003;
-                renderer.render(scene, camera);
-            }
-            animate();
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
+        // Efecto de transición suave en enlaces de navegación
+        document.querySelectorAll('.transition-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                const href = this.getAttribute('href');
+                if (href && href.startsWith('?')) {
+                    e.preventDefault();
+                    document.body.classList.add('transitioning');
+                    setTimeout(() => {
+                        window.location.href = href;
+                    }, 800);
+                }
             });
         });
     </script>
