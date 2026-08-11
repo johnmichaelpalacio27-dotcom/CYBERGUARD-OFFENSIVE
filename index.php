@@ -45,7 +45,7 @@ try {
     $db = new PDO('sqlite:' . $db_file);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Inicializar tablas necesarias con campos actualizados (Múltiples preguntas de seguridad, DDoS toggles, etc.)
+    // Inicializar tablas necesarias con campos actualizados
     $db->exec("CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
@@ -70,16 +70,27 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Tabla para Consultas de Ciberseguridad con protección
+    // Tabla para Consultas de Ciberseguridad con soporte de respuesta de administrador
     $db->exec("CREATE TABLE IF NOT EXISTS security_consultations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
+        admin_id INTEGER,
         email TEXT NOT NULL,
         subject TEXT NOT NULL,
         message TEXT NOT NULL,
+        response TEXT DEFAULT NULL,
         ip_address TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+
+    // Registrar administrador por defecto si no existe ninguno en la base de datos
+    $stmt_check_admin = $db->query("SELECT id FROM users WHERE role = 'admin'");
+    if (!$stmt_check_admin->fetch()) {
+        $admin_pass = password_hash('Admin123!', PASSWORD_BCRYPT);
+        $db->prepare("INSERT INTO users (nombre, apellido, email, password, role) VALUES (?, ?, ?, ?, ?)")
+           ->execute(['Admin', 'Root', 'admin@cyberguard.com', $admin_pass, 'admin']);
+    }
+
 } catch (Exception $e) {
     die("Error crítico de conexión a la base de datos de alta seguridad.");
 }
@@ -109,10 +120,9 @@ function register_failed_attempt($action_name) {
     }
     $_SESSION[$key]['attempts']++;
     
-    // Si pasa de 3 intentos, incrementar el tiempo de bloqueo de forma exponencial (30s, 60s, 120s...)
     if ($_SESSION[$key]['attempts'] >= 3) {
         $lock_time = 30 * pow(2, $_SESSION[$key]['attempts'] - 3);
-        $_SESSION[$key]['lock_until'] = time() + min($lock_time, 300); // Tope de 5 minutos
+        $_SESSION[$key]['lock_until'] = time() + min($lock_time, 300);
     }
 }
 
@@ -125,12 +135,41 @@ function reset_brute_force($action_name) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form_action = isset($_POST['action']) ? $_POST['action'] : '';
 
-    // Validación CSRF global para peticiones POST
     if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
         die("Error de validación de seguridad (CSRF Token inválido o expirado).");
     }
 
-    if ($form_action === 'register') {
+    // Lógica para que el Administrador responda consultas
+    if ($form_action === 'respond_consultation') {
+        if (!isset($_SESSION['user_id'])) {
+            header("Location: ?view=login");
+            exit;
+        }
+        
+        // Verificar que el usuario actual sea realmente admin (mitigación IDOR / Elevación de privilegios)
+        $stmt_rol = $db->prepare("SELECT role FROM users WHERE id = ?");
+        $stmt_rol->execute([$_SESSION['user_id']]);
+        $current_user_check = $stmt_rol->fetch(PDO::FETCH_ASSOC);
+
+        if ($current_user_check && $current_user_check['role'] === 'admin') {
+            $consultation_id = $_POST['consultation_id'];
+            $response_text = trim($_POST['response']);
+
+            if (!empty($response_text)) {
+                $stmt_resp = $db->prepare("UPDATE security_consultations SET response = ?, admin_id = ? WHERE id = ?");
+                $stmt_resp->execute([$response_text, $_SESSION['user_id'], $consultation_id]);
+                $message = "Respuesta enviada y registrada correctamente al usuario.";
+                $message_type = "success";
+                $action = 'profile';
+            } else {
+                $message = "La respuesta no puede estar vacía.";
+                $message_type = "error";
+                $action = 'profile';
+            }
+        } else {
+            die("Acceso no autorizado.");
+        }
+    } elseif ($form_action === 'register') {
         $nombre = trim($_POST['nombre']);
         $apellido = trim($_POST['apellido']);
         $email = trim($_POST['email']);
@@ -154,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sec_a3 = password_hash(trim($_POST['sec_answer_3']), PASSWORD_BCRYPT);
 
         try {
-            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2, sec_question_3, sec_answer_3) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?)");
+            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2, sec_question_3, sec_answer_3, role) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, 'analyst')");
             $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash, $hash_type, $sec_q1, $sec_a1, $sec_q2, $sec_a2, $sec_q3, $sec_a3]);
 
             $_SESSION['temp_new_hash'] = $single_use_hash;
@@ -165,7 +204,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message_type = "error";
             $action = 'register';
         }
-     
     } elseif ($form_action === 'login') {
         $lockout = check_brute_force('login');
         if ($lockout > 0) {
@@ -182,7 +220,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user && password_verify($password, $user['password'])) {
-                if (!empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+                // Si es admin, permitimos el acceso directo o validamos si aplica
+                if ($user['role'] !== 'admin' && !empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
                     register_failed_attempt('login');
                     $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
                     $message_type = "error";
@@ -340,7 +379,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $profile_pic_path = $old_data['profile_pic'];
         }
 
-        // Construir consulta dinámica para actualizar preguntas adicionales si se suministran respuestas
         $q_update_extras = "";
         $params_extras = [];
 
@@ -381,7 +419,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message_type = "success";
         $action = 'profile';
     } elseif ($form_action === 'consultation') {
-        // Control de límite de consultas por IP/Fuerza Bruta
         $lockout = check_brute_force('consultation');
         if ($lockout > 0) {
             $message = "Demasiadas consultas enviadas. Espere {$lockout} segundos para enviar otra solicitud.";
@@ -397,7 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, ip_address) VALUES (?, ?, ?, ?, ?)");
                 $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $client_ip]);
                 
-                register_failed_attempt('consultation'); // Aplica límite de intentos por intervalo
+                register_failed_attempt('consultation');
                 $message = "Consulta de ciberseguridad enviada y protegida con éxito contra flood/DDoS.";
                 $message_type = "success";
                 $action = 'consultation';
@@ -471,13 +508,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
         .form-control { width: 100%; padding: 0.8rem 1rem; background: rgba(3, 7, 18, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #fff; font-size: 0.95rem; }
         .form-control:focus { outline: none; border-color: var(--theme-color); box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
         
-        /* Input de Subida de Archivo Moderno y Nítido */
         .file-upload-wrapper { position: relative; width: 100%; overflow: hidden; display: inline-block; background: rgba(3, 7, 18, 0.9); border: 1px dashed var(--theme-color); border-radius: 6px; padding: 0.8rem; text-align: center; cursor: pointer; transition: all 0.3s; }
         .file-upload-wrapper:hover { background: rgba(6, 182, 212, 0.1); box-shadow: 0 0 10px rgba(6,182,212,0.3); }
         .file-upload-wrapper input[type=file] { font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; }
         .file-upload-text { font-size: 0.85rem; color: var(--theme-color); font-family: 'Orbitron', sans-serif; }
 
-        /* Contenedor Avatar 3D */
         .avatar-3d-box { width: 130px; height: 130px; border-radius: 50%; background: var(--theme-color); margin: 0 auto 1.2rem; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #030712; font-family: 'Orbitron'; font-weight: bold; overflow: hidden; border: 3px solid var(--theme-color); box-shadow: 0 0 20px var(--theme-color), inset 0 0 15px rgba(0,0,0,0.5); transform: perspective(600px) rotateY(15deg) rotateX(10deg); transition: transform 0.5s ease; }
         .avatar-3d-box:hover { transform: perspective(600px) rotateY(0deg) rotateX(0deg) scale(1.05); }
 
@@ -718,6 +753,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             $current_user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             $active_hash = $current_user['single_use_hash'];
+            $is_admin = ($current_user['role'] === 'admin');
             ?>
             <main class="content-section" style="max-width: 950px; width: 100%;">
                 <div class="badge-status">Panel de Perfil Avanzado con Capas de Seguridad</div>
@@ -737,6 +773,12 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <h3 style="color: #fff; font-size: 1.3rem; margin-bottom: 0.3rem; font-family: 'Orbitron';"><?php echo htmlspecialchars($current_user['nombre'] . ' ' . $current_user['apellido']); ?></h3>
                         <p style="font-size: 0.85rem; color: var(--theme-color); margin-bottom: 1rem;"><?php echo htmlspecialchars($current_user['email']); ?></p>
                         
+                        <?php if ($is_admin): ?>
+                            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; padding: 0.5rem; border-radius: 6px; font-family: 'Orbitron'; font-size: 0.8rem; margin-bottom: 1rem;">
+                                ROL: ADMINISTRADOR ROOT
+                            </div>
+                        <?php endif; ?>
+
                         <div style="text-align: left; margin-bottom: 1.5rem; background: rgba(3,7,18,0.5); padding: 10px; border-radius: 6px;">
                             <label style="font-size: 0.75rem; color: var(--theme-color); font-family: 'Orbitron';">Hash de Recuperación (Tipo: <?php echo strtoupper($current_user['hash_type']); ?>):</label>
                             <div class="hash-display"><?php echo htmlspecialchars($active_hash); ?></div>
@@ -758,72 +800,111 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </form>
                     </div>
 
-                    <!-- Tarjeta Derecha: Editor de Datos, Colores Libres, Subida Moderna, Anti-DDoS y Preguntas -->
+                    <!-- Tarjeta Derecha: Editor de Datos o Panel de Administración de Consultas -->
                     <div class="glass-card" style="max-width: 100%;">
-                        <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1.5rem;">Configuración de Estilo y Seguridad</h3>
-                        <form action="?view=profile" method="POST" enctype="multipart/form-data">
-                            <input type="hidden" name="action" value="update_profile">
-                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                            <div class="form-group">
-                                <label>Nombre</label>
-                                <input type="text" name="nombre" value="<?php echo htmlspecialchars($current_user['nombre']); ?>" class="form-control" required>
-                            </div>
-                            <div class="form-group">
-                                <label>Apellido</label>
-                                <input type="text" name="apellido" value="<?php echo htmlspecialchars($current_user['apellido']); ?>" class="form-control" required>
-                            </div>
-                            <div class="form-group">
-                                <label>Nueva Contraseña (Opcional)</label>
-                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener la actual">
-                            </div>
-
-                            <!-- Selector de Color Libre / Personalizable -->
-                            <div class="form-group">
-                                <label>Color Personalizado del Tema (Escribe o Selecciona)</label>
-                                <div style="display: flex; gap: 10px; align-items: center;">
-                                    <input type="color" name="theme_color_picker" id="colorPickerInput" value="<?php echo htmlspecialchars($active_theme_color); ?>" style="width: 50px; height: 40px; background: transparent; border: 1px solid var(--theme-color); border-radius: 6px; cursor: pointer;" oninput="document.getElementById('themeColorText').value = this.value;">
-                                    <input type="text" name="theme_color" id="themeColorText" value="<?php echo htmlspecialchars($active_theme_color); ?>" class="form-control" placeholder="#HEX o color CSS" required>
-                                </div>
-                            </div>
-
-                            <!-- Botón Subir Foto Moderno y Nítido -->
-                            <div class="form-group">
-                                <label>Subir Foto de Perfil (Moderno)</label>
-                                <div class="file-upload-wrapper">
-                                    <span class="file-upload-text" id="fileNameLabel">📂 Seleccionar imagen en alta definición...</span>
-                                    <input type="file" name="profile_pic" accept="image/png, image/jpeg, image/webp" onchange="document.getElementById('fileNameLabel').innerText = '✓ ' + this.files[0].name;">
-                                </div>
-                            </div>
-
-                            <!-- Toggle Activación/Desactivación de Protección DDoS -->
-                            <div class="form-group" style="background: rgba(3,7,18,0.6); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
-                                <label style="display: flex; align-items: center; justify-content: cursor; cursor: pointer; margin: 0;">
-                                    <span style="color: #fff; font-family: 'Orbitron'; font-size: 0.85rem;">Activar Escudo Anti-DDoS en Sesión</span>
-                                    <input type="checkbox" name="ddos_protection" value="1" <?php echo ($current_user['ddos_protection'] ?? 1) == 1 ? 'checked' : ''; ?> style="width: 18px; height: 18px; accent-color: var(--theme-color); cursor: pointer;">
-                                </label>
-                            </div>
-
-                            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;">
-                            <h4 style="font-family:'Orbitron'; font-size: 0.95rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Preguntas de Seguridad</h4>
+                        <?php if ($is_admin): ?>
+                            <h3 style="font-family: 'Orbitron'; color: #10b981; margin-bottom: 1.5rem;">Panel del Administrador: Consultas de Seguridad</h3>
+                            <p style="font-size: 0.85rem; color: #9ca3af; margin-bottom: 1.5rem;">Desde aquí puedes revisar los reportes y dudas enviadas por los usuarios y darles respuesta directa.</p>
                             
-                            <div class="form-group">
-                                <label>Pregunta 1: ¿Cuál es el nombre de tu primera mascota?</label>
-                                <input type="text" name="sec_question_1" value="¿Cuál es el nombre de tu primera mascota?" class="form-control" readonly>
-                                <input type="text" name="sec_answer_1" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
-                            </div>
-                            <div class="form-group">
-                                <label>Pregunta 2: ¿En qué ciudad naciste?</label>
-                                <input type="text" name="sec_question_2" value="¿En qué ciudad naciste?" class="form-control" readonly>
-                                <input type="text" name="sec_answer_2" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
-                            </div>
-                            <div class="form-group">
-                                <label>Pregunta 3: ¿Cuál es tu lenguaje de programación favorito?</label>
-                                <input type="text" name="sec_question_3" value="¿Cuál es tu lenguaje de programación favorito?" class="form-control" readonly>
-                                <input type="text" name="sec_answer_3" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
-                            </div>
+                            <?php
+                            $stmt_consultas = $db->query("SELECT * FROM security_consultations ORDER BY created_at DESC");
+                            $consultas_list = $stmt_consultas->fetchAll(PDO::FETCH_ASSOC);
+                            ?>
 
-                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar Todos los Cambios</button>
-                        </form>
+                            <?php if (empty($consultas_list)): ?>
+                                <p style="color: #9ca3af; font-size: 0.9rem;">No hay consultas de seguridad registradas en este momento.</p>
+                            <?php else: ?>
+                                <div style="display: flex; flex-direction: column; gap: 1.5rem; max-height: 600px; overflow-y: auto; padding-right: 5px;">
+                                    <?php foreach ($consultas_list as $cons): ?>
+                                        <div style="background: rgba(3, 7, 18, 0.8); border: 1px solid rgba(255,255,255,0.1); padding: 1.2rem; border-radius: 8px;">
+                                            <div style="font-size: 0.75rem; color: var(--theme-color); margin-bottom: 0.3rem;">De: <?php echo htmlspecialchars($cons['email']); ?> | IP: <?php echo htmlspecialchars($cons['ip_address'] ?? 'N/A'); ?></div>
+                                            <h4 style="color: #fff; font-size: 1rem; margin-bottom: 0.5rem; font-family:'Orbitron';"><?php echo htmlspecialchars($cons['subject']); ?></h4>
+                                            <p style="font-size: 0.9rem; color: #d1d5db; margin-bottom: 1rem; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;"><?php echo nl2br(htmlspecialchars($cons['message'])); ?></p>
+                                            
+                                            <?php if (!empty($cons['response'])): ?>
+                                                <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; padding: 0.8rem; font-size: 0.85rem; color: #a7f3d0;">
+                                                    <strong>Respuesta oficial dada:</strong><br>
+                                                    <?php echo nl2br(htmlspecialchars($cons['response'])); ?>
+                                                </div>
+                                            <?php else: ?>
+                                                <form action="?view=profile" method="POST">
+                                                    <input type="hidden" name="action" value="respond_consultation">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                                    <input type="hidden" name="consultation_id" value="<?php echo $cons['id']; ?>">
+                                                    <div class="form-group" style="margin-bottom: 0.8rem;">
+                                                        <textarea name="response" class="form-control" rows="3" placeholder="Escribe tu respuesta de resolución..." required style="font-size: 0.85rem;"></textarea>
+                                                    </div>
+                                                    <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Enviar Respuesta al Usuario</button>
+                                                </form>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+
+                        <?php else: ?>
+                            <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1.5rem;">Configuración de Estilo y Seguridad</h3>
+                            <form action="?view=profile" method="POST" enctype="multipart/form-data">
+                                <input type="hidden" name="action" value="update_profile">
+                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                <div class="form-group">
+                                    <label>Nombre</label>
+                                    <input type="text" name="nombre" value="<?php echo htmlspecialchars($current_user['nombre']); ?>" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Apellido</label>
+                                    <input type="text" name="apellido" value="<?php echo htmlspecialchars($current_user['apellido']); ?>" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Nueva Contraseña (Opcional)</label>
+                                    <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener la actual">
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Color Personalizado del Tema (Escribe o Selecciona)</label>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="color" name="theme_color_picker" id="colorPickerInput" value="<?php echo htmlspecialchars($active_theme_color); ?>" style="width: 50px; height: 40px; background: transparent; border: 1px solid var(--theme-color); border-radius: 6px; cursor: pointer;" oninput="document.getElementById('themeColorText').value = this.value;">
+                                        <input type="text" name="theme_color" id="themeColorText" value="<?php echo htmlspecialchars($active_theme_color); ?>" class="form-control" placeholder="#HEX o color CSS" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Subir Foto de Perfil (Moderno)</label>
+                                    <div class="file-upload-wrapper">
+                                        <span class="file-upload-text" id="fileNameLabel">📂 Seleccionar imagen en alta definición...</span>
+                                        <input type="file" name="profile_pic" accept="image/png, image/jpeg, image/webp" onchange="document.getElementById('fileNameLabel').innerText = '✓ ' + this.files[0].name;">
+                                    </div>
+                                </div>
+
+                                <div class="form-group" style="background: rgba(3,7,18,0.6); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                                    <label style="display: flex; align-items: center; justify-content: cursor; cursor: pointer; margin: 0;">
+                                        <span style="color: #fff; font-family: 'Orbitron'; font-size: 0.85rem;">Activar Escudo Anti-DDoS en Sesión</span>
+                                        <input type="checkbox" name="ddos_protection" value="1" <?php echo ($current_user['ddos_protection'] ?? 1) == 1 ? 'checked' : ''; ?> style="width: 18px; height: 18px; accent-color: var(--theme-color); cursor: pointer;">
+                                    </label>
+                                </div>
+
+                                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.5rem 0;">
+                                <h4 style="font-family:'Orbitron'; font-size: 0.95rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Preguntas de Seguridad</h4>
+                                
+                                <div class="form-group">
+                                    <label>Pregunta 1: ¿Cuál es el nombre de tu primera mascota?</label>
+                                    <input type="text" name="sec_question_1" value="¿Cuál es el nombre de tu primera mascota?" class="form-control" readonly>
+                                    <input type="text" name="sec_answer_1" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
+                                </div>
+                                <div class="form-group">
+                                    <label>Pregunta 2: ¿En qué ciudad naciste?</label>
+                                    <input type="text" name="sec_question_2" value="¿En qué ciudad naciste?" class="form-control" readonly>
+                                    <input type="text" name="sec_answer_2" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
+                                </div>
+                                <div class="form-group">
+                                    <label>Pregunta 3: ¿Cuál es tu lenguaje de programación favorito?</label>
+                                    <input type="text" name="sec_question_3" value="¿Cuál es tu lenguaje de programación favorito?" class="form-control" readonly>
+                                    <input type="text" name="sec_answer_3" class="form-control" placeholder="Nueva respuesta (dejar en blanco para no cambiar)" style="margin-top: 5px;">
+                                </div>
+
+                                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Guardar Todos los Cambios</button>
+                            </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             </main>
@@ -873,7 +954,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Efecto de transición suave al navegar
         document.querySelectorAll('.transition-link').forEach(link => {
             link.addEventListener('click', function(e) {
                 const href = this.getAttribute('href');
