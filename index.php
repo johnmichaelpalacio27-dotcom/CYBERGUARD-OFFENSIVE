@@ -70,7 +70,7 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Tabla para Consultas de Ciberseguridad con soporte de respuesta y archivos de administrador
+    // Tabla para Consultas de Ciberseguridad con soporte de archivos de usuario y administrador
     $db->exec("CREATE TABLE IF NOT EXISTS security_consultations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -78,13 +78,15 @@ try {
         email TEXT NOT NULL,
         subject TEXT NOT NULL,
         message TEXT NOT NULL,
+        user_file_name TEXT DEFAULT NULL,
+        user_file_path TEXT DEFAULT NULL,
         response TEXT DEFAULT NULL,
         admin_file_name TEXT DEFAULT NULL,
         admin_file_path TEXT DEFAULT NULL,
         ip_address TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
-
+    
     // Tabla para Chat en Vivo de Seguridad
     $db->exec("CREATE TABLE IF NOT EXISTS live_chat (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +176,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("Error de validación de seguridad (CSRF Token inválido o expirado).");
     }
 
-    // Lógica para que el Administrador responda consultas y suba archivos
     if ($form_action === 'respond_consultation') {
         if (!isset($_SESSION['user_id'])) {
             header("Location: ?view=login");
@@ -192,13 +193,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $admin_file_name = null;
             $admin_file_path = null;
 
-            // Procesar subida de archivo de respuesta (Word o PDF)
             if (isset($_FILES['admin_file']) && $_FILES['admin_file']['error'] === UPLOAD_ERR_OK) {
                 $file_tmp = $_FILES['admin_file']['tmp_name'];
                 $original_name = basename($_FILES['admin_file']['name']);
                 $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
                 
-                // Permitir extensiones de Word y PDF
                 $allowed_exts = ['pdf', 'doc', 'docx'];
                 $finfo = finfo_open(FILEINFO_MIME_TYPE);
                 $mime_type = finfo_file($finfo, $file_tmp);
@@ -526,16 +525,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $c_message = trim($_POST['message']);
             $c_uid = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
 
+            $user_file_name = null;
+            $user_file_path = null;
+
+            if (isset($_FILES['user_file']) && $_FILES['user_file']['error'] === UPLOAD_ERR_OK) {
+                $file_tmp = $_FILES['user_file']['tmp_name'];
+                $original_name = basename($_FILES['user_file']['name']);
+                $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+                
+                $allowed_exts = ['pdf', 'doc', 'docx'];
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime_type = finfo_file($finfo, $file_tmp);
+                $allowed_mimes = [
+                    'application/pdf', 
+                    'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                ];
+
+                if (in_array($file_ext, $allowed_exts) && in_array($mime_type, $allowed_mimes)) {
+                    $upload_dir = __DIR__ . '/uploads/';
+                    if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
+                    
+                    $user_file_name = $original_name;
+                    $user_file_path = 'uploads/user_consulta_' . time() . '_' . mt_rand(1000,9999) . '.' . $file_ext;
+                    move_uploaded_file($file_tmp, __DIR__ . '/' . $user_file_path);
+                }
+            }
+
             if (!empty($c_email) && !empty($c_subject) && !empty($c_message)) {
-                $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, ip_address) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $client_ip]);
+                $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, user_file_name, user_file_path, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $user_file_name, $user_file_path, $client_ip]);
                 
                 register_failed_attempt('consultation');
-                $message = "Consulta de ciberseguridad enviada y protegida con éxito contra flood/DDoS.";
+                $message = "Consulta de ciberseguridad y archivo adjunto enviados con éxito.";
                 $message_type = "success";
                 $action = 'consultation';
             } else {
-                $message = "Por favor complete todos los campos de la consulta.";
+                $message = "Por favor complete todos los campos obligatorios de la consulta.";
                 $message_type = "error";
                 $action = 'consultation';
             }
@@ -692,7 +718,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     <div class="badge-status">Centro de Reportes</div>
                     <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1rem; color: #fff;">Consulta de Ciberseguridad</h2>
                     <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Reporta anomalías, brechas o solicita asesoría técnica especializada. Esta sección cuenta con rate-limiting activo contra flood.</p>
-                    <form action="?view=consultation" method="POST">
+                    <form action="?view=consultation" method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="consultation">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         
@@ -707,6 +733,13 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div class="form-group">
                             <label>Descripción Detallada del Incidente</label>
                             <textarea name="message" class="form-control" rows="4" required placeholder="Describa el comportamiento observado..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Adjuntar Archivo de Soporte (PDF, Word)</label>
+                            <div class="file-upload-wrapper">
+                                <span class="file-upload-text">[+] Seleccionar Documento</span>
+                                <input type="file" name="user_file" accept=".pdf, .doc, .docx">
+                            </div>
                         </div>
                         <button type="submit" class="btn btn-primary" style="width: 100%;">Enviar Consulta Segura</button>
                     </form>
@@ -876,27 +909,38 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <?php if ($logged_user['role'] === 'admin'): ?>
                             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
                             <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas (Admin Root)</h3>
-                            <div style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
+                            <div style="max-height: 450px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                                 <?php 
                                 $consultas = $db->query("SELECT * FROM security_consultations ORDER BY created_at DESC");
                                 while($c = $consultas->fetch(PDO::FETCH_ASSOC)):
                                 ?>
-                                    <div style="background: rgba(3,7,18,0.8); padding: 0.8rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                                    <div style="background: rgba(3,7,18,0.8); padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
                                         <p style="font-size: 0.8rem; color: #eab308;">De: <?php echo htmlspecialchars($c['email']); ?> [IP: <?php echo htmlspecialchars($c['ip_address']); ?>]</p>
                                         <p style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0.2rem 0;"><?php echo htmlspecialchars($c['subject']); ?></p>
                                         <p style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 0.5rem;"><?php echo htmlspecialchars($c['message']); ?></p>
                                         
+                                        <!-- Previsualización del archivo enviado por el usuario -->
+                                        <?php if (!empty($c['user_file_path']) && file_exists(__DIR__ . '/' . $c['user_file_path'])): ?>
+                                            <div style="margin: 0.8rem 0; background: rgba(0,0,0,0.5); padding: 0.5rem; border-radius: 4px;">
+                                                <p style="font-size: 0.75rem; color: var(--theme-color); margin-bottom: 0.3rem;">Archivo del usuario: <?php echo htmlspecialchars($c['user_file_name']); ?></p>
+                                                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                                    <a href="<?php echo htmlspecialchars($c['user_file_path']); ?>" download="<?php echo htmlspecialchars($c['user_file_name']); ?>" class="btn btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.6rem; text-decoration: none;">[↓] Descargar</a>
+                                                </div>
+                                                <iframe src="<?php echo htmlspecialchars($c['user_file_path']); ?>" style="width: 100%; height: 180px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;" title="Previsualización documento"></iframe>
+                                            </div>
+                                        <?php endif; ?>
+
                                         <?php if (!empty($c['response'])): ?>
                                             <p style="font-size: 0.8rem; color: #10b981; background: rgba(16,185,129,0.1); padding: 0.4rem; border-radius: 4px; margin-bottom: 0.5rem;"><strong>Respuesta Admin:</strong> <?php echo htmlspecialchars($c['response']); ?></p>
                                             <?php if (!empty($c['admin_file_path']) && file_exists(__DIR__ . '/' . $c['admin_file_path'])): ?>
                                                 <div style="margin-bottom: 0.5rem;">
                                                     <a href="<?php echo htmlspecialchars($c['admin_file_path']); ?>" download="<?php echo htmlspecialchars($c['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none;">
-                                                        [↓] Descargar Adjunto: <?php echo htmlspecialchars($c['admin_file_name']); ?>
+                                                        [↓] Descargar Adjunto Admin: <?php echo htmlspecialchars($c['admin_file_name']); ?>
                                                     </a>
                                                 </div>
                                             <?php endif; ?>
                                         <?php else: ?>
-                                            <form action="?view=profile" method="POST" enctype="multipart/form-data">
+                                            <form action="?view=profile" method="POST" enctype="multipart/form-data" style="margin-top: 0.8rem;">
                                                 <input type="hidden" name="action" value="respond_consultation">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                 <input type="hidden" name="consultation_id" value="<?php echo $c['id']; ?>">
@@ -904,7 +948,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                                 <textarea name="response" class="form-control" placeholder="Escribir respuesta oficial..." style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required></textarea>
                                                 
                                                 <div class="form-group" style="margin-bottom: 0.5rem;">
-                                                    <label style="font-size: 0.75rem;">Adjuntar Archivo (PDF, Word):</label>
+                                                    <label style="font-size: 0.75rem;">Adjuntar Archivo de Respuesta (PDF, Word):</label>
                                                     <input type="file" name="admin_file" class="form-control" accept=".pdf, .doc, .docx" style="font-size: 0.75rem; padding: 0.3rem;">
                                                 </div>
 
@@ -916,8 +960,8 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             </div>
                         <?php else: ?>
                             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
-                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Mis Consultas y Respuestas de Seguridad</h3>
-                            <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
+                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Mis Consultas y Archivos Compartidos</h3>
+                            <div style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                                 <?php 
                                 $stmt_mis_consultas = $db->prepare("SELECT * FROM security_consultations WHERE user_id = ? OR email = ? ORDER BY created_at DESC");
                                 $stmt_mis_consultas->execute([$logged_user['id'], $logged_user['email']]);
@@ -927,15 +971,22 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                         <p style="font-size: 0.8rem; color: #9ca3af;">Asunto: <strong><?php echo htmlspecialchars($mc['subject']); ?></strong></p>
                                         <p style="font-size: 0.85rem; color: #fff; margin: 0.3rem 0;">Tu consulta: <?php echo htmlspecialchars($mc['message']); ?></p>
                                         
+                                        <?php if (!empty($mc['user_file_path']) && file_exists(__DIR__ . '/' . $mc['user_file_path'])): ?>
+                                            <div style="margin: 0.5rem 0; font-size: 0.75rem; color: var(--theme-color);">
+                                                Tu archivo adjunto: <a href="<?php echo htmlspecialchars($mc['user_file_path']); ?>" download="<?php echo htmlspecialchars($mc['user_file_name']); ?>" style="color: #fff; text-decoration: underline;"><?php echo htmlspecialchars($mc['user_file_name']); ?></a>
+                                            </div>
+                                        <?php endif; ?>
+
                                         <?php if (!empty($mc['response'])): ?>
                                             <div style="margin-top: 0.8rem; background: rgba(16,185,129,0.1); border: 1px solid #10b981; padding: 0.6rem; border-radius: 4px;">
-                                                <p style="font-size: 0.85rem; color: #10b981;"><strong>Respuesta del Administrador:</strong> <?php echo htmlspecialchars($mc['response']); ?></p>
+                                                <p style="font-size: 0.85rem; color: #10b981; margin-bottom: 0.5rem;"><strong>Respuesta del Administrador:</strong> <?php echo htmlspecialchars($mc['response']); ?></p>
                                                 
                                                 <?php if (!empty($mc['admin_file_path']) && file_exists(__DIR__ . '/' . $mc['admin_file_path'])): ?>
                                                     <div style="margin-top: 0.5rem;">
-                                                        <a href="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" download="<?php echo htmlspecialchars($mc['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none;">
-                                                            [↓] Descargar Adjunto: <?php echo htmlspecialchars($mc['admin_file_name']); ?>
+                                                        <a href="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" download="<?php echo htmlspecialchars($mc['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none; margin-bottom: 0.5rem; display: inline-block;">
+                                                            [↓] Descargar Archivo del Admin: <?php echo htmlspecialchars($mc['admin_file_name']); ?>
                                                         </a>
+                                                        <iframe src="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" style="width: 100%; height: 180px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;" title="Previsualizador documento admin"></iframe>
                                                     </div>
                                                 <?php endif; ?>
                                             </div>
