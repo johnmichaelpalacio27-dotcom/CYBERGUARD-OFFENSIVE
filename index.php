@@ -684,7 +684,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
     [↓] Descarga Segura Anti-IDOR
 </a>
 
-
         <?php if (!empty($message)): ?>
             <div style="max-width: 600px; margin: 1rem auto 0 auto; width: 100%;">
                 <div class="alert alert-<?php echo $message_type === 'success' ? 'success' : 'error'; ?>">
@@ -904,7 +903,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                 <select name="hash_type" class="form-control" style="margin-bottom: 0.8rem;">
                                     <option value="sha256">SHA-256</option>
                                     <option value="whirlpool">Whirlpool</option>
-                                    <option value="md5">MD5</option>
+                                    <option value="sha512">SHA-512</option>
                                 </select>
                             </div>
                             <button type="submit" class="btn btn-outline" style="width: 100%; font-size: 0.85rem;">Generar Nuevo Hash de Perfil</button>
@@ -913,7 +912,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <!-- Panel de Administración de Consultas / Historial de Usuario -->
                         <?php if ($logged_user['role'] === 'admin'): ?>
                             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
-                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas (Admin Root)</h3>
+                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas Admin Root </h3>
                             <div style="max-height: 450px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                                 <?php 
                                 $consultas = $db->query("SELECT * FROM security_consultations ORDER BY created_at DESC");
