@@ -679,6 +679,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 <?php endif; ?>
             </nav>
         </header>
+        <!-- Ejemplo de enlace seguro anti-IDOR para descargas en la vista de perfil -->
+<a href="download.php?id=<?php echo $c['id']; ?>&type=consultation&target=user" class="btn btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.6rem; text-decoration: none;">
+    [↓] Descarga Segura Anti-IDOR
+</a>
+
 
         <?php if (!empty($message)): ?>
             <div style="max-width: 600px; margin: 1rem auto 0 auto; width: 100%;">
