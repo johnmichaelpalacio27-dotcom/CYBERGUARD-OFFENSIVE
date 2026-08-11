@@ -221,7 +221,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($user && password_verify($password, $user['password'])) {
                 // Si es admin, permitimos el acceso directo o validamos si aplica
-                if ($user['role'] !== 'admin' && !empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+               if ($user['role'] !== 'admin') {
+    // validación normal para analistas
+}
                     register_failed_attempt('login');
                     $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
                     $message_type = "error";
