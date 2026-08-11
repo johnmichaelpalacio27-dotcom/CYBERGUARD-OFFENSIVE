@@ -70,7 +70,7 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Tabla para Consultas de Ciberseguridad con soporte de respuesta de administrador
+    // Tabla para Consultas de Ciberseguridad con soporte de respuesta y archivos de administrador
     $db->exec("CREATE TABLE IF NOT EXISTS security_consultations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -79,6 +79,8 @@ try {
         subject TEXT NOT NULL,
         message TEXT NOT NULL,
         response TEXT DEFAULT NULL,
+        admin_file_name TEXT DEFAULT NULL,
+        admin_file_path TEXT DEFAULT NULL,
         ip_address TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
@@ -172,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("Error de validación de seguridad (CSRF Token inválido o expirado).");
     }
 
-    // Lógica para que el Administrador responda consultas
+    // Lógica para que el Administrador responda consultas y suba archivos
     if ($form_action === 'respond_consultation') {
         if (!isset($_SESSION['user_id'])) {
             header("Location: ?view=login");
@@ -186,11 +188,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($current_user_check && $current_user_check['role'] === 'admin') {
             $consultation_id = $_POST['consultation_id'];
             $response_text = trim($_POST['response']);
+            
+            $admin_file_name = null;
+            $admin_file_path = null;
+
+            // Procesar subida de archivo de respuesta (Word o PDF)
+            if (isset($_FILES['admin_file']) && $_FILES['admin_file']['error'] === UPLOAD_ERR_OK) {
+                $file_tmp = $_FILES['admin_file']['tmp_name'];
+                $original_name = basename($_FILES['admin_file']['name']);
+                $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+                
+                // Permitir extensiones de Word y PDF
+                $allowed_exts = ['pdf', 'doc', 'docx'];
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime_type = finfo_file($finfo, $file_tmp);
+                $allowed_mimes = [
+                    'application/pdf', 
+                    'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                ];
+
+                if (in_array($file_ext, $allowed_exts) && in_array($mime_type, $allowed_mimes)) {
+                    $upload_dir = __DIR__ . '/uploads/';
+                    if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
+                    
+                    $admin_file_name = $original_name;
+                    $admin_file_path = 'uploads/resp_' . $consultation_id . '_' . time() . '.' . $file_ext;
+                    move_uploaded_file($file_tmp, __DIR__ . '/' . $admin_file_path);
+                }
+            }
 
             if (!empty($response_text)) {
-                $stmt_resp = $db->prepare("UPDATE security_consultations SET response = ?, admin_id = ? WHERE id = ?");
-                $stmt_resp->execute([$response_text, $_SESSION['user_id'], $consultation_id]);
-                $message = "Respuesta enviada y registrada correctamente al usuario.";
+                $stmt_resp = $db->prepare("UPDATE security_consultations SET response = ?, admin_id = ?, admin_file_name = ?, admin_file_path = ? WHERE id = ?");
+                $stmt_resp->execute([$response_text, $_SESSION['user_id'], $admin_file_name, $admin_file_path, $consultation_id]);
+                
+                $message = "Respuesta y archivo adjunto enviados correctamente.";
                 $message_type = "success";
                 $action = 'profile';
             } else {
@@ -649,7 +681,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 <div class="content-section">
                     <div class="badge-status">Sobre CyberGuard</div>
                     <h1>Arquitectura de <span>Defensa Total</span></h1>
-                    <p>CyberGuard Offensive es un entorno simulado de pruebas de penetración y control de accesos diseñado bajo los más estrictos lineamientos de seguridad defensiva. Nuestro motor integra contramedidas frente a inyecciones SQL, ataques de fuerza bruta con retardos exponenciales, protección contra falsificación de peticiones en sitios cruzados (CSRF) y gestión cifrada de contraseñas.</p>
+                    <p>CyberGuard Offensive[cite: 4] es un entorno simulado de pruebas de penetración y control de accesos diseñado bajo los más estrictos lineamientos de seguridad defensiva. Nuestro motor integra contramedidas frente a inyecciones SQL, ataques de fuerza bruta con retardos exponenciales, protección contra falsificación de peticiones en sitios cruzados (CSRF) y gestión cifrada de contraseñas.</p>
                     <p>Contamos con herramientas automatizadas de auditoría y un panel centralizado para administradores y analistas de seguridad enfocados en la mitigación de vectores de ataque complejos.</p>
                     <div class="cta-group" style="margin-top: 2rem;">
                         <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
@@ -718,7 +750,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     <a href="?view=recover" class="link-sub" style="text-align: center;">¿Olvidó su contraseña? Recupérela con su Hash</a>
                 </div>
                 <script>
-                    // Mostrar campos adicionales si el correo ingresado es admin
                     document.querySelector('input[name="login_id"]').addEventListener('blur', function() {
                         if(this.value === 'admin@cyberguard.com') {
                             document.getElementById('admin-extra-q').style.display = 'block';
@@ -767,7 +798,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <label>Respuesta de Seguridad 1</label>
                             <input type="text" name="sec_answer_1" class="form-control" required placeholder="Respuesta secreta">
                         </div>
-                        <!-- Preguntas 2 y 3 ocultas por defecto para analistas estándar, se pueden inicializar vacías -->
                         <input type="hidden" name="sec_question_2" value="">
                         <input type="hidden" name="sec_answer_2" value="">
                         <input type="hidden" name="sec_question_3" value="">
@@ -842,7 +872,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <button type="submit" class="btn btn-outline" style="width: 100%; font-size: 0.85rem;">Generar Nuevo Hash de Perfil</button>
                         </form>
 
-                        <!-- Panel de Administración de Consultas (Solo para Admin) -->
+                        <!-- Panel de Administración de Consultas / Historial de Usuario -->
                         <?php if ($logged_user['role'] === 'admin'): ?>
                             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
                             <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas (Admin Root)</h3>
@@ -857,15 +887,60 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                         <p style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 0.5rem;"><?php echo htmlspecialchars($c['message']); ?></p>
                                         
                                         <?php if (!empty($c['response'])): ?>
-                                            <p style="font-size: 0.8rem; color: #10b981; background: rgba(16,185,129,0.1); padding: 0.4rem; border-radius: 4px;"><strong>Respuesta Admin:</strong> <?php echo htmlspecialchars($c['response']); ?></p>
+                                            <p style="font-size: 0.8rem; color: #10b981; background: rgba(16,185,129,0.1); padding: 0.4rem; border-radius: 4px; margin-bottom: 0.5rem;"><strong>Respuesta Admin:</strong> <?php echo htmlspecialchars($c['response']); ?></p>
+                                            <?php if (!empty($c['admin_file_path']) && file_exists(__DIR__ . '/' . $c['admin_file_path'])): ?>
+                                                <div style="margin-bottom: 0.5rem;">
+                                                    <a href="<?php echo htmlspecialchars($c['admin_file_path']); ?>" download="<?php echo htmlspecialchars($c['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none;">
+                                                        [↓] Descargar Adjunto: <?php echo htmlspecialchars($c['admin_file_name']); ?>
+                                                    </a>
+                                                </div>
+                                            <?php endif; ?>
                                         <?php else: ?>
-                                            <form action="?view=profile" method="POST">
+                                            <form action="?view=profile" method="POST" enctype="multipart/form-data">
                                                 <input type="hidden" name="action" value="respond_consultation">
                                                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                 <input type="hidden" name="consultation_id" value="<?php echo $c['id']; ?>">
-                                                <input type="text" name="response" class="form-control" placeholder="Escribir respuesta..." style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required>
-                                                <button type="submit" class="btn btn-primary" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Responder</button>
+                                                
+                                                <textarea name="response" class="form-control" placeholder="Escribir respuesta oficial..." style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required></textarea>
+                                                
+                                                <div class="form-group" style="margin-bottom: 0.5rem;">
+                                                    <label style="font-size: 0.75rem;">Adjuntar Archivo (PDF, Word):</label>
+                                                    <input type="file" name="admin_file" class="form-control" accept=".pdf, .doc, .docx" style="font-size: 0.75rem; padding: 0.3rem;">
+                                                </div>
+
+                                                <button type="submit" class="btn btn-primary" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Enviar Respuesta y Archivo</button>
                                             </form>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endwhile; ?>
+                            </div>
+                        <?php else: ?>
+                            <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
+                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Mis Consultas y Respuestas de Seguridad</h3>
+                            <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
+                                <?php 
+                                $stmt_mis_consultas = $db->prepare("SELECT * FROM security_consultations WHERE user_id = ? OR email = ? ORDER BY created_at DESC");
+                                $stmt_mis_consultas->execute([$logged_user['id'], $logged_user['email']]);
+                                while($mc = $stmt_mis_consultas->fetch(PDO::FETCH_ASSOC)):
+                                ?>
+                                    <div style="background: rgba(3,7,18,0.8); padding: 1rem; border-radius: 6px; border: 1px solid rgba(6,182,212,0.2);">
+                                        <p style="font-size: 0.8rem; color: #9ca3af;">Asunto: <strong><?php echo htmlspecialchars($mc['subject']); ?></strong></p>
+                                        <p style="font-size: 0.85rem; color: #fff; margin: 0.3rem 0;">Tu consulta: <?php echo htmlspecialchars($mc['message']); ?></p>
+                                        
+                                        <?php if (!empty($mc['response'])): ?>
+                                            <div style="margin-top: 0.8rem; background: rgba(16,185,129,0.1); border: 1px solid #10b981; padding: 0.6rem; border-radius: 4px;">
+                                                <p style="font-size: 0.85rem; color: #10b981;"><strong>Respuesta del Administrador:</strong> <?php echo htmlspecialchars($mc['response']); ?></p>
+                                                
+                                                <?php if (!empty($mc['admin_file_path']) && file_exists(__DIR__ . '/' . $mc['admin_file_path'])): ?>
+                                                    <div style="margin-top: 0.5rem;">
+                                                        <a href="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" download="<?php echo htmlspecialchars($mc['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none;">
+                                                            [↓] Descargar Adjunto: <?php echo htmlspecialchars($mc['admin_file_name']); ?>
+                                                        </a>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php else: ?>
+                                            <p style="font-size: 0.75rem; color: #eab308; margin-top: 0.5rem;">[⏳] Estado: Pendiente de respuesta por el equipo de analistas.</p>
                                         <?php endif; ?>
                                     </div>
                                 <?php endwhile; ?>
@@ -940,7 +1015,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         
                         <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1rem;">Chat en Vivo de Seguridad</h3>
                         <div id="chat-box" style="height:250px; overflow-y:auto; background:rgba(3, 7, 18, 0.6); border: 1px solid rgba(6, 182, 212, 0.2); padding:1rem; border-radius:8px; margin-bottom:1rem; font-size: 0.9rem;">
-                            <!-- Los mensajes se cargan aquí vía AJAX -->
                         </div>
                         <div style="display: flex; gap: 10px;">
                             <input type="text" id="chat-input" class="form-control" placeholder="Escribe un mensaje de seguridad...">
@@ -968,7 +1042,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
         renderer.setSize(window.innerWidth, window.innerHeight);
         container.appendChild(renderer.domElement);
 
-        // Crear geometría de malla cibernética (partículas / nodos)
         const particlesGeometry = new THREE.BufferGeometry();
         const particlesCount = 700;
         const posArray = new Float32Array(particlesCount * 3);
@@ -991,7 +1064,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
         camera.position.z = 4;
 
-        // Animación de rotación fluida
         let mouseX = 0;
         let mouseY = 0;
         document.addEventListener('mousemove', (event) => {
@@ -1013,7 +1085,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Script para manejo del Chat en Vivo vía AJAX
         function cargarChat() {
             fetch('chat_backend.php')
                 .then(response => response.text())
@@ -1042,7 +1113,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 }).catch(err => {});
         }
 
-        // Si existe el chat en la vista actual, iniciar polling
         if(document.getElementById('chat-box')) {
             setInterval(cargarChat, 3000);
             cargarChat();
@@ -1050,5 +1120,3 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
     </script>
 </body>
 </html>
-
-```
