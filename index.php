@@ -1,7 +1,7 @@
 <?php
 // --- CONFIGURACIÓN DE SESIÓN Y SEGURIDAD ROBUSTA (HTTPOnly, Secure, Strict Mode) ---
 if (session_status() === PHP_SESSION_NONE) {
-    ini_set('session.cookie_httponly', 1);
+    C: ini_set('session.cookie_httponly', 1);
     ini_set('session.cookie_secure', 0); // Cambiar a 1 si usas HTTPS real
     ini_set('session.use_strict_mode', 1);
     ini_set('session.cookie_samesite', 'Strict');
@@ -248,7 +248,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = "Acceso root denegado: Las respuestas a las preguntas de seguridad del administrador son incorrectas.";
                     }
                 } else {
-                    // Si el usuario registró respuestas, las validamos de forma flexible o las omitimos si está vacía para evitar bloqueos
                     if (!empty($user['sec_answer_1']) && !empty($answer_1) && !password_verify($answer_1, $user['sec_answer_1'])) {
                         $auth_passed = false;
                         $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
@@ -260,22 +259,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $message_type = "error";
                     $action = 'login';
                 } else {
-                    reset_brute_force('login');
-                    session_regenerate_id(true);
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_nombre'] = $user['nombre'];
-                    
-                    header("Location: ?view=profile");
-                    exit;
-                }
-            } else {
-                register_failed_attempt('login');
-                $message = "Credenciales de acceso incorrectas.";
-                $message_type = "error";
-                $action = 'login';
-            }
-        }
                     reset_brute_force('login');
                     session_regenerate_id(true);
                     $_SESSION['user_id'] = $user['id'];
@@ -390,7 +373,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $user_id = $_SESSION['user_id'];
         
-        // Comprobar rol actual para verificar si es admin
         $stmt_check_rol = $db->prepare("SELECT role, password FROM users WHERE id = ?");
         $stmt_check_rol->execute([$user_id]);
         $current_db_user = $stmt_check_rol->fetch(PDO::FETCH_ASSOC);
@@ -402,7 +384,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $theme_color = trim($_POST['theme_color'] ?? '#06b6d4');
         $ddos_toggle = isset($_POST['ddos_protection']) ? 1 : 0;
         
-        // Si es admin, exigimos verificación estricta de la contraseña actual para permitir cambios de seguridad o credenciales
         if ($is_admin_user) {
             $current_admin_password = $_POST['current_admin_password'] ?? '';
             if (empty($current_admin_password) || !password_verify($current_admin_password, $current_db_user['password'])) {
@@ -750,7 +731,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                     <?php endif; ?>
 
-                    <form action="?view=login" method="POST" onsubmit="if(document.getElementById('roleCheckNotice') && document.getElementById('roleCheckNotice').value === 'admin')">
+                    <form action="?view=login" method="POST">
                         <input type="hidden" name="action" value="login">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <div class="form-group">
@@ -762,13 +743,13 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <input type="password" name="password" class="form-control" required autocomplete="current-password">
                         </div>
 
-                        <!-- Pregunta para Analista / Estándar (Opcional en login si genera conflicto) -->
+                        <!-- Pregunta para Analista / Estándar -->
                         <div class="form-group" id="analystQuestionBox">
                             <label style="color: #eab308;">Pregunta de Seguridad 1: ¿Cuál es el nombre de tu primera mascota? <span style="font-size:0.75rem; color:#9ca3af;">(Opcional)</span></label>
                             <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta (opcional)" autocomplete="off">
                         </div>
 
-                        <!-- Preguntas Robusta múltiples para Administrador Root -->
+                        <!-- Preguntas Robustas Múltiples para Administrador Root -->
                         <div id="adminQuestionsBox" style="display:none; background: rgba(16,185,129,0.08); border: 1px solid #10b981; padding: 12px; border-radius: 6px; margin-bottom: 1.2rem;">
                             <label style="color: #10b981; font-size: 0.8rem; font-family:'Orbitron'; margin-bottom:0.8rem; display:block;">[!] AUTENTICACIÓN ROOT MULTI-FASE REQUERIDA</label>
                             
@@ -1067,7 +1048,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             opacity: 0.25
         });
         const sphere = new THREE.Mesh(geometry, material);
-        scene.add(scene.add ? sphere : sphere); // Compatible
+        scene.add(sphere);
 
         camera.position.z = 5;
 
