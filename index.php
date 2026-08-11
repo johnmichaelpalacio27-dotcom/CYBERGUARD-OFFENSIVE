@@ -83,12 +83,28 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
 
-    // Registrar administrador por defecto si no existe ninguno en la base de datos
+    // Registrar administrador por defecto si no existe ninguno en la base de datos (con preguntas de seguridad robustas de admin por defecto)
     $stmt_check_admin = $db->query("SELECT id FROM users WHERE role = 'admin'");
     if (!$stmt_check_admin->fetch()) {
-        $admin_pass = password_hash('Admin123!', PASSWORD_BCRYPT);
-        $db->prepare("INSERT INTO users (nombre, apellido, email, password, role) VALUES (?, ?, ?, ?, ?)")
-           ->execute(['Admin', 'Root', 'admin@cyberguard.com', $admin_pass, 'admin']);
+        $admin_pass = password_hash('AdminRoot999!', PASSWORD_BCRYPT);
+        $adm_a1 = password_hash('CyberGuardRootMasterKey', PASSWORD_BCRYPT);
+        $adm_a2 = password_hash('ZeroDayDefenseProtocol', PASSWORD_BCRYPT);
+        $adm_a3 = password_hash('AES-256-GCM', PASSWORD_BCRYPT);
+        
+        $db->prepare("INSERT INTO users (nombre, apellido, email, password, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2, sec_question_3, sec_answer_3, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+           ->execute([
+               'Admin', 
+               'Root', 
+               'admin@cyberguard.com', 
+               $admin_pass, 
+               '¿Cuál es la clave maestra de inicialización del sistema?', 
+               $adm_a1, 
+               '¿Cuál es el protocolo de defensa ante brechas zero-day?', 
+               $adm_a2, 
+               '¿Cuál es el estándar de cifrado simétrico principal?', 
+               $adm_a3, 
+               'admin'
+           ]);
     }
 
 } catch (Exception $e) {
@@ -146,7 +162,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
         
-        // Verificar que el usuario actual sea realmente admin (mitigación IDOR / Elevación de privilegios)
         $stmt_rol = $db->prepare("SELECT role FROM users WHERE id = ?");
         $stmt_rol->execute([$_SESSION['user_id']]);
         $current_user_check = $stmt_rol->fetch(PDO::FETCH_ASSOC);
@@ -214,16 +229,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $login_id = trim($_POST['login_id']);
             $password = $_POST['password'];
             $answer_1 = trim($_POST['sec_answer_1'] ?? '');
+            $answer_2 = trim($_POST['sec_answer_2'] ?? '');
+            $answer_3 = trim($_POST['sec_answer_3'] ?? '');
 
             $stmt = $db->prepare("SELECT * FROM users WHERE email = ?");
             $stmt->execute([$login_id]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-           if ($user && password_verify($password, $user['password'])) {
-                // Si el usuario NO es admin, validamos su pregunta de seguridad 1
-                if ($user['role'] !== 'admin' && !empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+            if ($user && password_verify($password, $user['password'])) {
+                // Validación estricta de preguntas según el rol
+                $auth_passed = true;
+                if ($user['role'] === 'admin') {
+                    // El admin requiere validación de sus 3 preguntas de seguridad robustas para entrar
+                    if (!password_verify($answer_1, $user['sec_answer_1']) || 
+                        !password_verify($answer_2, $user['sec_answer_2']) || 
+                        !password_verify($answer_3, $user['sec_answer_3'])) {
+                        $auth_passed = false;
+                        $message = "Acceso root denegado: Las respuestas a las preguntas de seguridad del administrador son incorrectas.";
+                    }
+                } else {
+                    // Usuarios analistas requieren la pregunta 1
+                    if (!empty($user['sec_answer_1']) && !password_verify($answer_1, $user['sec_answer_1'])) {
+                        $auth_passed = false;
+                        $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
+                    }
+                }
+
+                if (!$auth_passed) {
                     register_failed_attempt('login');
-                    $message = "Acceso denegado: La respuesta a la pregunta de seguridad es incorrecta.";
                     $message_type = "error";
                     $action = 'login';
                 } else {
@@ -341,11 +374,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $user_id = $_SESSION['user_id'];
         
+        // Comprobar rol actual para verificar si es admin
+        $stmt_check_rol = $db->prepare("SELECT role, password FROM users WHERE id = ?");
+        $stmt_check_rol->execute([$user_id]);
+        $current_db_user = $stmt_check_rol->fetch(PDO::FETCH_ASSOC);
+        $is_admin_user = ($current_db_user['role'] === 'admin');
+
         $new_nombre = trim($_POST['nombre']);
         $new_apellido = trim($_POST['apellido']);
         $new_password = $_POST['password'];
         $theme_color = trim($_POST['theme_color'] ?? '#06b6d4');
         $ddos_toggle = isset($_POST['ddos_protection']) ? 1 : 0;
+        
+        // Si es admin, exigimos verificación estricta de la contraseña actual para permitir cambios de seguridad o credenciales
+        if ($is_admin_user) {
+            $current_admin_password = $_POST['current_admin_password'] ?? '';
+            if (empty($current_admin_password) || !password_verify($current_admin_password, $current_db_user['password'])) {
+                $message = "Error de Hardening: Debe ingresar su contraseña de Administrador actual para autorizar cambios en el perfil root.";
+                $message_type = "error";
+                $action = 'profile';
+                goto profile_update_skip;
+            }
+        }
         
         $q1 = trim($_POST['sec_question_1']);
         $a1 = trim($_POST['sec_answer_1']);
@@ -418,6 +468,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = "Perfil y capas de seguridad actualizadas de forma exitosa.";
         $message_type = "success";
         $action = 'profile';
+
+        profile_update_skip:
     } elseif ($form_action === 'consultation') {
         $lockout = check_brute_force('consultation');
         if ($lockout > 0) {
@@ -682,21 +734,42 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                     <?php endif; ?>
 
-                    <form action="?view=login" method="POST">
+                    <form action="?view=login" method="POST" onsubmit="if(document.getElementById('roleCheckNotice') && document.getElementById('roleCheckNotice').value === 'admin')">
                         <input type="hidden" name="action" value="login">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         <div class="form-group">
                             <label>Correo Electrónico</label>
-                            <input type="text" name="login_id" class="form-control" required autocomplete="off">
+                            <input type="text" id="loginEmailInput" name="login_id" class="form-control" required autocomplete="off" onblur="if(this.value.includes('admin')) { document.getElementById('adminQuestionsBox').style.display='block'; document.getElementById('analystQuestionBox').style.display='none'; } else { document.getElementById('adminQuestionsBox').style.display='none'; document.getElementById('analystQuestionBox').style.display='block'; }">
                         </div>
                         <div class="form-group">
                             <label>Contraseña</label>
                             <input type="password" name="password" class="form-control" required autocomplete="current-password">
                         </div>
-                        <div class="form-group">
+
+                        <!-- Pregunta para Analista / Estándar -->
+                        <div class="form-group" id="analystQuestionBox">
                             <label style="color: #eab308;">Pregunta de Seguridad 1: ¿Cuál es el nombre de tu primera mascota?</label>
-                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta" required autocomplete="off">
+                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta secreta" autocomplete="off">
                         </div>
+
+                        <!-- Preguntas Robusta múltiples para Administrador Root -->
+                        <div id="adminQuestionsBox" style="display:none; background: rgba(16,185,129,0.08); border: 1px solid #10b981; padding: 12px; border-radius: 6px; margin-bottom: 1.2rem;">
+                            <label style="color: #10b981; font-size: 0.8rem; font-family:'Orbitron'; margin-bottom:0.8rem; display:block;">[!] AUTENTICACIÓN ROOT MULTI-FASE REQUERIDA</label>
+                            
+                            <div class="form-group" style="margin-bottom:0.8rem;">
+                                <label style="font-size:0.75rem; color:#10b981;">1. ¿Cuál es la clave maestra de inicialización del sistema?</label>
+                                <input type="password" name="sec_answer_1" class="form-control" placeholder="Respuesta maestra 1" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0.8rem;">
+                                <label style="font-size:0.75rem; color:#10b981;">2. ¿Cuál es el protocolo de defensa ante brechas zero-day?</label>
+                                <input type="password" name="sec_answer_2" class="form-control" placeholder="Respuesta maestra 2" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label style="font-size:0.75rem; color:#10b981;">3. ¿Cuál es el estándar de cifrado simétrico principal?</label>
+                                <input type="password" name="sec_answer_3" class="form-control" placeholder="Respuesta maestra 3" autocomplete="off">
+                            </div>
+                        </div>
+
                         <button type="submit" class="btn btn-primary" style="width:100%; margin-top:1rem;">Entrar al Sistema</button>
                     </form>
                     <div style="display: flex; justify-content: space-between; margin-top: 1rem;">
@@ -803,9 +876,51 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     <!-- Tarjeta Derecha: Editor de Datos o Panel de Administración de Consultas -->
                     <div class="glass-card" style="max-width: 100%;">
                         <?php if ($is_admin): ?>
-                            <h3 style="font-family: 'Orbitron'; color: #10b981; margin-bottom: 1.5rem;">Panel del Administrador: Consultas de Seguridad</h3>
-                            <p style="font-size: 0.85rem; color: #9ca3af; margin-bottom: 1.5rem;">Desde aquí puedes revisar los reportes y dudas enviadas por los usuarios y darles respuesta directa.</p>
+                            <h3 style="font-family: 'Orbitron'; color: #10b981; margin-bottom: 1.5rem;">Panel Root: Gestión de Consultas y Hardening</h3>
+                            <p style="font-size: 0.85rem; color: #9ca3af; margin-bottom: 1.5rem;">Desde aquí puedes revisar reportes de usuarios y actualizar tu contraseña o preguntas de seguridad robustas.</p>
                             
+                            <!-- Sección de Edición de Credenciales y Preguntas del Administrador -->
+                            <div style="background: rgba(3, 7, 18, 0.9); border: 1px solid rgba(16, 185, 129, 0.3); padding: 1.5rem; border-radius: 8px; margin-bottom: 2rem;">
+                                <h4 style="font-family:'Orbitron'; font-size: 0.95rem; color: #10b981; margin-bottom: 1rem;">Actualizar Contraseña y Preguntas Root</h4>
+                                <form action="?view=profile" method="POST">
+                                    <input type="hidden" name="action" value="update_profile">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                                    <input type="hidden" name="nombre" value="<?php echo htmlspecialchars($current_user['nombre']); ?>">
+                                    <input type="hidden" name="apellido" value="<?php echo htmlspecialchars($current_user['apellido']); ?>">
+                                    
+                                    <div class="form-group">
+                                        <label style="color: #ef4444;">Contraseña de Administrador Actual (Obligatoria para cambios)</label>
+                                        <input type="password" name="current_admin_password" class="form-control" required placeholder="Contraseña actual root">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Nueva Contraseña (Opcional)</label>
+                                        <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener actual">
+                                    </div>
+
+                                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1.2rem 0;">
+                                    <label style="font-size:0.8rem; color:#10b981; font-family:'Orbitron'; margin-bottom:0.5rem; display:block;">Preguntas de Seguridad Root Maestras</label>
+                                    
+                                    <div class="form-group">
+                                        <label style="font-size:0.75rem;">1. ¿Cuál es la clave maestra de inicialización del sistema?</label>
+                                        <input type="hidden" name="sec_question_1" value="¿Cuál es la clave maestra de inicialización del sistema?">
+                                        <input type="password" name="sec_answer_1" class="form-control" placeholder="Nueva respuesta maestra 1 (opcional)">
+                                    </div>
+                                    <div class="form-group">
+                                        <label style="font-size:0.75rem;">2. ¿Cuál es el protocolo de defensa ante brechas zero-day?</label>
+                                        <input type="hidden" name="sec_question_2" value="¿Cuál es el protocolo de defensa ante brechas zero-day?">
+                                        <input type="password" name="sec_answer_2" class="form-control" placeholder="Nueva respuesta maestra 2 (opcional)">
+                                    </div>
+                                    <div class="form-group">
+                                        <label style="font-size:0.75rem;">3. ¿Cuál es el estándar de cifrado simétrico principal?</label>
+                                        <input type="hidden" name="sec_question_3" value="¿Cuál es el estándar de cifrado simétrico principal?">
+                                        <input type="password" name="sec_answer_3" class="form-control" placeholder="Nueva respuesta maestra 3 (opcional)">
+                                    </div>
+
+                                    <button type="submit" class="btn btn-primary" style="background: #10b981; color: #030712; width: 100%; margin-top: 1rem;">Actualizar Configuración Root</button>
+                                </form>
+                            </div>
+
+                            <h4 style="font-family: 'Orbitron'; color: #10b981; margin-bottom: 1rem; font-size:1.1rem;">Bandeja de Consultas Recibidas</h4>
                             <?php
                             $stmt_consultas = $db->query("SELECT * FROM security_consultations ORDER BY created_at DESC");
                             $consultas_list = $stmt_consultas->fetchAll(PDO::FETCH_ASSOC);
@@ -936,7 +1051,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             opacity: 0.25
         });
         const sphere = new THREE.Mesh(geometry, material);
-        scene.add(sphere);
+        scene.add(scene.add ? sphere : sphere); // Compatible
 
         camera.position.z = 5;
 
