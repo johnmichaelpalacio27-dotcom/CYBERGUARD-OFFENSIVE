@@ -1,66 +1,77 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// chat_backend.php - Chat avanzado con soporte multimedia y perfiles expuestos para IDOR
+session_start();
+if (!isset($_SESSION['user_id'])) exit("No autorizado");
 
-if (!isset($_SESSION['user_id'])) {
-    header("HTTP/1.1 403 Forbidden");
-    exit("No autorizado");
-}
+$db = new PDO('sqlite:' . __DIR__ . '/cyberguard_secure.db');
 
-$db_file = __DIR__ . '/cyberguard_secure.db';
-$db = new PDO('sqlite:' . $db_file);
-$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-// Clave simétrica de cifrado para los mensajes (Hardcoded o derivada por usuario)
-define('CHAT_ENCRYPTION_KEY', hash('sha256', 'CyberGuard_Master_Secret_Salt_2026', true));
-
-function encrypt_chat_message($plaintext) {
-    $ivlen = openssl_cipher_iv_length($cipher = "AES-256-GCM");
-    $iv = openssl_random_pseudo_bytes($ivlen);
-    $ciphertext = openssl_encrypt($plaintext, $cipher, CHAT_ENCRYPTION_KEY, $options=0, $iv, $tag);
-    return base64_encode($iv . $tag . $ciphertext);
-}
-
-function decrypt_chat_message($iv_tag_ciphertext) {
-    $c = base64_decode($iv_tag_ciphertext);
-    $ivlen = openssl_cipher_iv_length($cipher = "AES-256-GCM");
-    $iv = substr($c, 0, $ivlen);
-    $ivlen_tag = $ivlen + 16; // GCM tag length is 16 bytes
-    $tag = substr($c, $ivlen, 16);
-    $ciphertext = substr($c, $ivlen_tag);
-    return openssl_decrypt($ciphertext, $cipher, CHAT_ENCRYPTION_KEY, $options=0, $iv, $tag);
-}
-
+// Acción: Enviar mensaje o contenido multimedia
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-        exit("CSRF Error");
+    $msg = trim($_POST['message'] ?? '');
+    $file_path = null;
+    $file_type = 'text';
+
+    // Manejo de subida de archivos (Fotos, Documentos, Audios/Voz)
+    if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] === UPLOAD_ERR_OK) {
+        $file_tmp = $_FILES['media_file']['tmp_name'];
+        $original_name = basename($_FILES['media_file']['name']);
+        $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+        
+        $allowed_exts = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx', 'webm', 'mp3', 'wav', 'ogg'];
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime_type = finfo_file($finfo, $file_tmp);
+
+        if (in_array($file_ext, $allowed_exts)) {
+            $upload_dir = __DIR__ . '/uploads/';
+            if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
+            
+            if (in_array($file_ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+                $file_type = 'image';
+            } elseif (in_array($file_ext, ['webm', 'mp3', 'wav', 'ogg'])) {
+                $file_type = 'audio';
+            } else {
+                $file_type = 'document';
+            }
+
+            $file_path = 'uploads/chat_' . time() . '_' . mt_rand(1000,9999) . '.' . $file_ext;
+            move_uploaded_file($file_tmp, __DIR__ . '/' . $file_path);
+        }
     }
 
-    $raw_message = trim($_POST['message'] ?? '');
-    if (!empty($raw_message)) {
-        // Sanitizar contra XSS antes de cifrar o guardar
-        $sanitized_msg = htmlspecialchars($raw_message, ENT_QUOTES, 'UTF-8');
-        $encrypted_payload = encrypt_chat_message($sanitized_msg);
-
-        $stmt = $db->prepare("INSERT INTO live_chat (user_id, message) VALUES (?, ?)");
-        $stmt->execute([$_SESSION['user_id'], $encrypted_payload]);
+    if (!empty($msg) || !empty($file_path)) {
+        $stmt = $db->prepare("INSERT INTO live_chat (user_id, message, file_path, file_type) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$_SESSION['user_id'], htmlspecialchars($msg), $file_path, $file_type]);
     }
-    exit("OK");
 }
 
-// Renderizar historial descifrando en tiempo de ejecución para el cliente autorizado
-$query = $db->query("SELECT live_chat.*, users.nombre, users.role FROM live_chat JOIN users ON live_chat.user_id = users.id ORDER BY live_chat.created_at ASC LIMIT 50");
-while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
-    $decrypted_text = decrypt_chat_message($row['message']);
-    if ($decrypted_text === false) {
-        $decrypted_text = "[Mensaje cifrado corrupto o ilegible]";
+// Acción: Obtener mensajes (últimos 50)
+$mensajes = $db->query("SELECT live_chat.*, users.nombre, users.apellido, users.id as account_id 
+                       FROM live_chat 
+                       JOIN users ON live_chat.user_id = users.id 
+                       ORDER BY created_at DESC LIMIT 50");
+
+foreach (array_reverse($mensajes->fetchAll()) as $m) {
+    $safe_name = htmlspecialchars($m['nombre'] . ' ' . $m['apellido']);
+    $account_id = $m['account_id'];
+    echo "<div style='margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;'>";
+    // Enlace al perfil con la ID expuesta para auditoría IDOR
+    echo "<span style='font-size:0.75rem; color:#9ca3af;'>[ID: {$account_id}]</span> ";
+    echo "<strong style='color:var(--theme-color); cursor:pointer;' onclick='verPerfilUsuario({$account_id})'>{$safe_name}:</strong> ";
+    
+    if (!empty($m['message'])) {
+        echo "<span style='color:#fff;'> " . htmlspecialchars($m['message']) . "</span><br>";
     }
-    $badge_color = ($row['role'] === 'admin') ? '#eab308' : 'var(--theme-color)';
-    echo "<div style='margin-bottom:0.6rem;'>";
-    echo "<strong style='color: {$badge_color};'>[" . htmlspecialchars($row['nombre']) . "]:</strong> ";
-    echo "<span style='color: #f3f4f6;'>" . $decrypted_text . "</span>";
-    echo "<span style='font-size: 0.65rem; color: #6b7280; margin-left: 0.5rem;'>(" . $row['created_at'] . ")</span>";
+
+    // Renderizado según tipo de archivo multimedia estilo WhatsApp
+    if (!empty($m['file_path'])) {
+        if ($m['file_type'] === 'image') {
+            echo "<div style='margin-top:6px;'><img src='{$m['file_path']}' style='max-width:200px; border-radius:6px; border:1px solid rgba(255,255,255,0.2);'></div>";
+        } elseif ($m['file_type'] === 'audio') {
+            echo "<div style='margin-top:6px;'><audio controls src='{$m['file_path']}' style='height:35px; width:100%; max-width:250px;'></audio></div>";
+        } else {
+            echo "<div style='margin-top:6px;'><a href='{$m['file_path']}' download class='btn btn-outline' style='font-size:0.75rem; padding:0.2rem 0.5rem;'>📄 Descargar Documento</a></div>";
+        }
+    }
     echo "</div>";
 }
 ?>
