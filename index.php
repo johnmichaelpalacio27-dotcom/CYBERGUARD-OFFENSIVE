@@ -39,37 +39,55 @@ if (($now_time - $_SESSION['ddos_tracker']['start']) < 2) {
     $_SESSION['ddos_tracker'] = ['count' => 1, 'start' => $now_time];
 }
 
+// --- CONTROL DE BLOQUEO ESTRICTO (3 INTENTOS -> 403 FORBIDDEN) ---
+function enforce_strict_attempts($action_name, $max_attempts = 3) {
+    $key = 'strict_attempts_' . $action_name;
+    if (!isset($_SESSION[$key])) {
+        $_SESSION[$key] = 0;
+    }
+    
+    $_SESSION[$key]++;
+    if ($_SESSION[$key] >= $max_attempts) {
+        header("HTTP/1.1 403 Forbidden");
+        die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Has superado el límite de 3 intentos permitidos en el área de [<strong>$action_name</strong>]. Acceso bloqueado por seguridad.</p></body></html>");
+    }
+}
+
+function reset_strict_attempts($action_name) {
+    $key = 'strict_attempts_' . $action_name;
+    $_SESSION[$key] = 0;
+}
+
 // Base de datos SQLite local para persistencia segura
 $db_file = __DIR__ . '/cyberguard_secure.db';
 try {
     $db = new PDO('sqlite:' . $db_file);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // En la sección de inicialización de tablas de tu base de datos SQLite:
-    $db->exec("CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT NOT NULL,
-        apellido TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        single_use_hash TEXT DEFAULT '',
-        public_user_hash TEXT DEFAULT '', -- Añadido para enmascarar la ID en chats y perfiles públicos
-        hash_type TEXT DEFAULT 'sha256',
-        hash_used INTEGER DEFAULT 0,
-        hash_security_active INTEGER DEFAULT 1,
-        profile_pic TEXT DEFAULT '',
-        theme_color TEXT DEFAULT '#06b6d4',
-        ddos_protection INTEGER DEFAULT 1,
-        sec_question_1 TEXT DEFAULT '',
-        sec_answer_1 TEXT DEFAULT '',
-        sec_question_2 TEXT DEFAULT '',
-        sec_answer_2 TEXT DEFAULT '',
-        sec_question_3 TEXT DEFAULT '',
-        sec_answer_3 TEXT DEFAULT '',
-        role TEXT DEFAULT 'analyst',
-        status TEXT DEFAULT 'active',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )");
+   $db->exec("CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    apellido TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    single_use_hash TEXT DEFAULT '',
+    public_user_hash TEXT DEFAULT '',
+    hash_type TEXT DEFAULT 'sha256',
+    hash_used INTEGER DEFAULT 0,
+    hash_security_active INTEGER DEFAULT 1,
+    profile_pic TEXT DEFAULT '',
+    theme_color TEXT DEFAULT '#06b6d4',
+    ddos_protection INTEGER DEFAULT 1,
+    sec_question_1 TEXT DEFAULT '',
+    sec_answer_1 TEXT DEFAULT '',
+    sec_question_2 TEXT DEFAULT '',
+    sec_answer_2 TEXT DEFAULT '',
+    sec_question_3 TEXT DEFAULT '',
+    sec_answer_3 TEXT DEFAULT '',
+    role TEXT DEFAULT 'analyst',
+    status TEXT DEFAULT 'active', -- 'active', 'deactivated', 'deleted'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)");
 
     // Tabla para Consultas de Ciberseguridad con soporte de archivos de usuario y administrador
     $db->exec("CREATE TABLE IF NOT EXISTS security_consultations (
@@ -139,44 +157,87 @@ $message = '';
 $message_type = '';
 $action = isset($_GET['view']) ? $_GET['view'] : 'home';
 
-// --- CONTROL DE BLOQUEO POR FUERZA BRUTA (BRUTE FORCE LOCKOUT) ---
-function check_brute_force($action_name) {
-    $key = 'bf_' . $action_name;
-    if (!isset($_SESSION[$key])) {
-        $_SESSION[$key] = ['attempts' => 0, 'lock_until' => 0];
-    }
-    
-    if (time() < $_SESSION[$key]['lock_until']) {
-        header("HTTP/1.1 403 Forbidden");
-        die("<h1>403 Forbidden</h1><p>Demasiados intentos. Acceso bloqueado temporalmente por seguridad.</p>");
-    }
-    return 0;
-}
-
-function register_failed_attempt($action_name) {
-    $key = 'bf_' . $action_name;
-    if (!isset($_SESSION[$key])) {
-        $_SESSION[$key] = ['attempts' => 0, 'lock_until' => 0];
-    }
-    $_SESSION[$key]['attempts']++;
-    
-    if ($_SESSION[$key]['attempts'] >= 3) {
-        $lock_time = 30 * pow(2, $_SESSION[$key]['attempts'] - 3);
-        $_SESSION[$key]['lock_until'] = time() + min($lock_time, 300);
-    }
-}
-
-function reset_brute_force($action_name) {
-    $key = 'bf_' . $action_name;
-    $_SESSION[$key] = ['attempts' => 0, 'lock_until' => 0];
-}
-
 // --- PROCESAMIENTO DE ACCIONES BACKEND & PROTECCIÓN IDOR/CSRF ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form_action = isset($_POST['action']) ? $_POST['action'] : '';
 
     if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
         die("Error de validación de seguridad (CSRF Token inválido o expirado).");
+    }
+
+    // --- DESACTIVAR CUENTA ---
+    if ($form_action === 'deactivate_account') {
+        if (!isset($_SESSION['user_id'])) { header("Location: ?view=login"); exit; }
+        $password_confirm = $_POST['confirm_password'] ?? '';
+        
+        $stmt = $db->prepare("SELECT password FROM users WHERE id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $u = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($u && password_verify($password_confirm, $u['password'])) {
+            reset_strict_attempts('deactivate');
+            $stmt_up = $db->prepare("UPDATE users SET status = 'deactivated' WHERE id = ?");
+            $stmt_up->execute([$_SESSION['user_id']]);
+            
+            session_destroy();
+            header("Location: ?view=login&msg=deactivated");
+            exit;
+        } else {
+            enforce_strict_attempts('deactivate', 3);
+            $message = "Contraseña incorrecta. Intento fallido de desactivación.";
+            $message_type = "error";
+            $action = 'profile';
+        }
+    }
+
+    // --- ELIMINAR CUENTA ---
+    if ($form_action === 'delete_account') {
+        if (!isset($_SESSION['user_id'])) { header("Location: ?view=login"); exit; }
+        $password_confirm = $_POST['confirm_password'] ?? '';
+        
+        $stmt = $db->prepare("SELECT password FROM users WHERE id = ?");
+        $stmt->execute([$_SESSION['user_id']]);
+        $u = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($u && password_verify($password_confirm, $u['password'])) {
+            reset_strict_attempts('delete_account');
+            $stmt_up = $db->prepare("UPDATE users SET status = 'deleted' WHERE id = ?");
+            $stmt_up->execute([$_SESSION['user_id']]);
+            
+            session_destroy();
+            header("Location: ?view=login&msg=deleted");
+            exit;
+        } else {
+            enforce_strict_attempts('delete_account', 3);
+            $message = "Contraseña incorrecta. 403 - Intento de eliminación fallido.";
+            $message_type = "error";
+            $action = 'profile';
+        }
+    }
+
+    // --- REACTIVAR / RECUPERAR CUENTA ---
+    if ($form_action === 'reactivate_account') {
+        $email = trim($_POST['reactivate_email']);
+        $password = $_POST['reactivate_password'];
+        
+        $stmt = $db->prepare("SELECT * FROM users WHERE email = ? AND status IN ('deactivated', 'deleted')");
+        $stmt->execute([$email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($user && password_verify($password, $user['password'])) {
+            reset_strict_attempts('reactivate');
+            $stmt_act = $db->prepare("UPDATE users SET status = 'active' WHERE id = ?");
+            $stmt_act->execute([$user['id']]);
+            
+            $message = "Cuenta reactivada exitosamente. Ya puede iniciar sesión.";
+            $message_type = "success";
+            $action = 'login';
+        } else {
+            enforce_strict_attempts('reactivate', 3);
+            $message = "Credenciales inválidas o la cuenta no se encuentra en estado de suspensión/eliminación.";
+            $message_type = "error";
+            $action = 'reactivate';
+        }
     }
 
     if ($form_action === 'respond_consultation') {
@@ -253,14 +314,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $sec_q1 = trim($_POST['sec_question_1']);
         $sec_a1 = password_hash(trim($_POST['sec_answer_1']), PASSWORD_BCRYPT);
-        $sec_q2 = trim($_POST['sec_question_2']);
-        $sec_a2 = password_hash(trim($_POST['sec_answer_2']), PASSWORD_BCRYPT);
-        $sec_q3 = trim($_POST['sec_question_3']);
-        $sec_a3 = password_hash(trim($_POST['sec_answer_3']), PASSWORD_BCRYPT);
 
         try {
-            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, sec_question_2, sec_answer_2, sec_question_3, sec_answer_3, role) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, 'analyst')");
-            $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash, $hash_type, $sec_q1, $sec_a1, $sec_q2, $sec_a2, $sec_q3, $sec_a3]);
+            $stmt = $db->prepare("INSERT INTO users (nombre, apellido, email, password, single_use_hash, hash_type, hash_used, hash_security_active, sec_question_1, sec_answer_1, role) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, 'analyst')");
+            $stmt->execute([$nombre, $apellido, $email, $password, $single_use_hash, $hash_type, $sec_q1, $sec_a1]);
 
             $_SESSION['temp_new_hash'] = $single_use_hash;
             header("Location: ?view=login&registered=1");
@@ -271,23 +328,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $action = 'register';
         }
     } elseif ($form_action === 'login') {
-        $lockout = check_brute_force('login');
-        if ($lockout > 0) {
-            $message = "Demasiados intentos fallidos. Acceso bloqueado temporalmente. Espere {$lockout} segundos.";
-            $message_type = "error";
-            $action = 'login';
-        } else {
-            $login_id = trim($_POST['login_id']);
-            $password = $_POST['password'];
-            $answer_1 = trim($_POST['sec_answer_1'] ?? '');
-            $answer_2 = trim($_POST['sec_answer_2'] ?? '');
-            $answer_3 = trim($_POST['sec_answer_3'] ?? '');
+        $login_id = trim($_POST['login_id']);
+        $password = $_POST['password'];
+        $answer_1 = trim($_POST['sec_answer_1'] ?? '');
+        $answer_2 = trim($_POST['sec_answer_2'] ?? '');
+        $answer_3 = trim($_POST['sec_answer_3'] ?? '');
 
-            $stmt = $db->prepare("SELECT * FROM users WHERE email = ?");
-            $stmt->execute([$login_id]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt = $db->prepare("SELECT * FROM users WHERE email = ?");
+        $stmt->execute([$login_id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user && password_verify($password, $user['password'])) {
+        if ($user) {
+            if ($user['status'] !== 'active') {
+                enforce_strict_attempts('login_inactive', 3);
+                $message = "Acceso Denegado (403): La cuenta está desactivada o eliminada. Por favor reactívela.";
+                $message_type = "error";
+                $action = 'login';
+            } else if (password_verify($password, $user['password'])) {
                 $auth_passed = true;
                 if ($user['role'] === 'admin') {
                     if (!password_verify($answer_1, $user['sec_answer_1']) || 
@@ -304,7 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if ($auth_passed) {
-                    reset_brute_force('login');
+                    reset_strict_attempts('login');
                     $_SESSION['user_id'] = $user['id'];
                     $_SESSION['user_email'] = $user['email'];
                     $_SESSION['user_nombre'] = $user['nombre'];
@@ -312,48 +369,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
             }
-
-            register_failed_attempt('login');
-            
-            $key = 'bf_login';
-            if ($_SESSION[$key]['attempts'] >= 3) {
-                header("HTTP/1.1 403 Forbidden");
-                die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
-            }
-
-            $message = "Credenciales de acceso incorrectas.";
-            $message_type = "error";
-            $action = 'login';
         }
+
+        enforce_strict_attempts('login', 3);
+        $message = "Credenciales de acceso incorrectas.";
+        $message_type = "error";
+        $action = 'login';
     } elseif ($form_action === 'recover_hash') {
-        $lockout = check_brute_force('recover');
-        if ($lockout > 0) {
-            $message = "Demasiados intentos de recuperación. Espere {$lockout} segundos.";
+        $recovery_hash = trim($_POST['recovery_hash']);
+
+        if (empty($recovery_hash)) {
+            $message = "Por favor ingrese el Hash de seguridad de su perfil.";
             $message_type = "error";
             $action = 'recover';
         } else {
-            $recovery_hash = trim($_POST['recovery_hash']);
+            $stmt = $db->prepare("SELECT * FROM users WHERE single_use_hash = ?");
+            $stmt->execute([$recovery_hash]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (empty($recovery_hash)) {
-                $message = "Por favor ingrese el Hash de seguridad de su perfil.";
+            if ($user) {
+                $_SESSION['recovery_user_id'] = $user['id'];
+                header("Location: ?view=reset_password");
+                exit;
+            } else {
+                enforce_strict_attempts('recover', 3);
+                $message = "El Hash ingresado es inválido o no pertenece a ningún perfil activo.";
                 $message_type = "error";
                 $action = 'recover';
-            } else {
-                $stmt = $db->prepare("SELECT * FROM users WHERE single_use_hash = ?");
-                $stmt->execute([$recovery_hash]);
-                $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($user) {
-                    reset_brute_force('recover');
-                    $_SESSION['recovery_user_id'] = $user['id'];
-                    header("Location: ?view=reset_password");
-                    exit;
-                } else {
-                    register_failed_attempt('recover');
-                    $message = "El Hash ingresado es inválido o no pertenece a ningún perfil activo.";
-                    $message_type = "error";
-                    $action = 'recover';
-                }
             }
         }
     } elseif ($form_action === 'reset_password_new') {
@@ -437,19 +479,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($is_admin_user) {
             $current_admin_password = $_POST['current_admin_password'] ?? '';
             if (empty($current_admin_password) || !password_verify($current_admin_password, $current_db_user['password'])) {
-                $message = "Error de Hardening: Debe ingresar su contraseña de Administrador actual para autorizar cambios en el perfil root.";
+                enforce_strict_attempts('update_profile_admin', 3);
+                $message = "Error de Hardening (403): Debe ingresar su contraseña de Administrador actual para autorizar cambios en el perfil root.";
                 $message_type = "error";
                 $action = 'profile';
                 goto profile_update_skip;
             }
+            reset_strict_attempts('update_profile_admin');
         }
         
         $q1 = trim($_POST['sec_question_1']);
         $a1 = trim($_POST['sec_answer_1']);
-        $q2 = trim($_POST['sec_question_2'] ?? '');
-        $a2 = trim($_POST['sec_answer_2'] ?? '');
-        $q3 = trim($_POST['sec_question_3'] ?? '');
-        $a3 = trim($_POST['sec_answer_3'] ?? '');
         
         $profile_pic_path = null;
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
@@ -485,18 +525,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $params_extras[] = $q1;
             $params_extras[] = $hashed_a1;
         }
-        if (!empty($a2)) {
-            $hashed_a2 = password_hash($a2, PASSWORD_BCRYPT);
-            $q_update_extras .= ", sec_question_2 = ?, sec_answer_2 = ?";
-            $params_extras[] = $q2;
-            $params_extras[] = $hashed_a2;
-        }
-        if (!empty($a3)) {
-            $hashed_a3 = password_hash($a3, PASSWORD_BCRYPT);
-            $q_update_extras .= ", sec_question_3 = ?, sec_answer_3 = ?";
-            $params_extras[] = $q3;
-            $params_extras[] = $hashed_a3;
-        }
 
         if (!empty($new_password)) {
             $hashed_pass = password_hash($new_password, PASSWORD_BCRYPT);
@@ -518,57 +546,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         profile_update_skip:
     } elseif ($form_action === 'consultation') {
-        $lockout = check_brute_force('consultation');
-        if ($lockout > 0) {
-            $message = "Demasiadas consultas enviadas. Espere {$lockout} segundos para enviar otra solicitud.";
-            $message_type = "error";
+        $c_email = trim($_POST['email']);
+        $c_subject = trim($_POST['subject']);
+        $c_message = trim($_POST['message']);
+        $c_uid = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+
+        $user_file_name = null;
+        $user_file_path = null;
+
+        if (isset($_FILES['user_file']) && $_FILES['user_file']['error'] === UPLOAD_ERR_OK) {
+            $file_tmp = $_FILES['user_file']['tmp_name'];
+            $original_name = basename($_FILES['user_file']['name']);
+            $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
+            
+            $allowed_exts = ['pdf', 'doc', 'docx'];
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime_type = finfo_file($finfo, $file_tmp);
+            $allowed_mimes = [
+                'application/pdf', 
+                'application/msword', 
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            ];
+
+            if (in_array($file_ext, $allowed_exts) && in_array($mime_type, $allowed_mimes)) {
+                $upload_dir = __DIR__ . '/uploads/';
+                if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
+                
+                $user_file_name = $original_name;
+                $user_file_path = 'uploads/user_consulta_' . time() . '_' . mt_rand(1000,9999) . '.' . $file_ext;
+                move_uploaded_file($file_tmp, __DIR__ . '/' . $user_file_path);
+            }
+        }
+
+        if (!empty($c_email) && !empty($c_subject) && !empty($c_message)) {
+            $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, user_file_name, user_file_path, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $user_file_name, $user_file_path, $client_ip]);
+            
+            $message = "Consulta de ciberseguridad y archivo adjunto enviados con éxito.";
+            $message_type = "success";
             $action = 'consultation';
         } else {
-            $c_email = trim($_POST['email']);
-            $c_subject = trim($_POST['subject']);
-            $c_message = trim($_POST['message']);
-            $c_uid = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
-
-            $user_file_name = null;
-            $user_file_path = null;
-
-            if (isset($_FILES['user_file']) && $_FILES['user_file']['error'] === UPLOAD_ERR_OK) {
-                $file_tmp = $_FILES['user_file']['tmp_name'];
-                $original_name = basename($_FILES['user_file']['name']);
-                $file_ext = strtolower(pathinfo($original_name, PATHINFO_EXTENSION));
-                
-                $allowed_exts = ['pdf', 'doc', 'docx'];
-                $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                $mime_type = finfo_file($finfo, $file_tmp);
-                $allowed_mimes = [
-                    'application/pdf', 
-                    'application/msword', 
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                ];
-
-                if (in_array($file_ext, $allowed_exts) && in_array($mime_type, $allowed_mimes)) {
-                    $upload_dir = __DIR__ . '/uploads/';
-                    if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
-                    
-                    $user_file_name = $original_name;
-                    $user_file_path = 'uploads/user_consulta_' . time() . '_' . mt_rand(1000,9999) . '.' . $file_ext;
-                    move_uploaded_file($file_tmp, __DIR__ . '/' . $user_file_path);
-                }
-            }
-
-            if (!empty($c_email) && !empty($c_subject) && !empty($c_message)) {
-                $stmt = $db->prepare("INSERT INTO security_consultations (user_id, email, subject, message, user_file_name, user_file_path, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$c_uid, $c_email, $c_subject, $c_message, $user_file_name, $user_file_path, $client_ip]);
-                
-                register_failed_attempt('consultation');
-                $message = "Consulta de ciberseguridad y archivo adjunto enviados con éxito.";
-                $message_type = "success";
-                $action = 'consultation';
-            } else {
-                $message = "Por favor complete todos los campos obligatorios de la consulta.";
-                $message_type = "error";
-                $action = 'consultation';
-            }
+            $message = "Por favor complete todos los campos obligatorios de la consulta.";
+            $message_type = "error";
+            $action = 'consultation';
         }
     }
 }
@@ -612,7 +632,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background-color: #030712; color: #f3f4f6; font-family: 'Inter', sans-serif; overflow-x: hidden; width: 100vw; min-height: 100vh; }
         #canvas-container { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; pointer-events: none; transition: transform 1.2s ease-in-out; }
-        body.transitioning #canvas-container { transform: scale(1.1) rotate(180deg); filter: hue-rotate(45deg); }
         .ui-layer { position: relative; z-index: 2; width: 100%; min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 2rem 4rem; }
         header { display: flex; justify-content: space-between; align-items: center; width: 100%; max-width: 1200px; margin: 0 auto; }
         .logo { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--theme-color); letter-spacing: 2px; text-shadow: 0 0 10px rgba(6, 182, 212, 0.4); text-decoration: none; }
@@ -712,62 +731,33 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     <div class="badge-status">Sobre CyberGuard</div>
                     <h1>Arquitectura de <span>Defensa Total</span></h1>
                     <p>CyberGuard Offensive es un entorno simulado de pruebas de penetración y control de accesos diseñado bajo los más estrictos lineamientos de seguridad defensiva. Nuestro motor integra contramedidas frente a inyecciones SQL, ataques de fuerza bruta con retardos exponenciales, protección contra falsificación de peticiones en sitios cruzados (CSRF) y gestión cifrada de contraseñas.</p>
-                    <p>Contamos con herramientas automatizadas de auditoría y un panel centralizado para administradores y analistas de seguridad enfocados en la mitigación de vectores de ataque complejos.</p>
                     <div class="cta-group" style="margin-top: 2rem;">
                         <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
                     </div>
                 </div>
-            <?php elseif ($action === 'view_user_profile'): ?>
-                <?php 
-                if (!isset($_SESSION['user_id'])) {
-                    header("HTTP/1.1 403 Forbidden");
-                    die("<h1>403 Forbidden</h1><p>Acceso denegado. Debe iniciar sesión.</p>");
-                }
-
-                $target_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-                
-                $stmt_current = $db->prepare("SELECT role FROM users WHERE id = ?");
-                $stmt_current->execute([$_SESSION['user_id']]);
-                $curr_user_data = $stmt_current->fetch(PDO::FETCH_ASSOC);
-
-                if ($curr_user_data['role'] !== 'admin' && $_SESSION['user_id'] !== $target_id) {
-                    header("HTTP/1.1 403 Forbidden");
-                    die("<h1>403 Forbidden</h1><p>No tienes autorización para visualizar este perfil (IDOR bloqueado).</p>");
-                }
-
-                $stmt_target = $db->prepare("SELECT id, nombre, apellido, email, profile_pic, theme_color, created_at, role, public_user_hash FROM users WHERE id = ?");
-                $stmt_target.execute([$target_id]);
-                $t_user = $stmt_target->fetch(PDO::FETCH_ASSOC);
-                ?>
-                <div class="glass-card" style="margin: 0 auto; width: 100%; max-width: 600px;">
-                    <div class="badge-status">Perfil Público Verificado [Blindado contra IDOR]</div>
-                    <?php if ($t_user): ?>
-                        <div class="avatar-3d-box">
-                            <?php if (!empty($t_user['profile_pic']) && file_exists(__DIR__ . '/' . $t_user['profile_pic'])): ?>
-                                <img src="<?php echo htmlspecialchars($t_user['profile_pic']); ?>" style="width:100%; height:100%; object-fit:cover;" alt="Avatar">
-                            <?php else: ?>
-                                <?php echo strtoupper(substr($t_user['nombre'], 0, 1)); ?>
-                            <?php endif; ?>
-                        </div>
-                        <h2 style="font-family: 'Orbitron'; text-align: center; color: #fff;"><?php echo htmlspecialchars($t_user['nombre'] . ' ' . $t_user['apellido']); ?></h2>
-                        <p style="text-align: center; color: var(--theme-color); font-size: 0.9rem; margin-bottom: 1.5rem;">Hash ID: #<?php echo htmlspecialchars($t_user['public_user_hash']); ?> &bull; Rol: <?php echo htmlspecialchars($t_user['role']); ?></p>
+            <?php elseif ($action === 'reactivate'): ?>
+                <div class="glass-card" style="margin: 0 auto; width: 100%;">
+                    <div class="badge-status">Recuperación de Cuenta Suspendida</div>
+                    <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1.5rem; color: #fff;">Reactivar Cuenta</h2>
+                    <form action="?view=reactivate" method="POST">
+                        <input type="hidden" name="action" value="reactivate_account">
+                        <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         
-                        <div style="background: rgba(3,7,18,0.8); padding: 1.2rem; border-radius: 8px; border: 1px solid rgba(6,182,212,0.3);">
-                            <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #9ca3af;"><strong>Miembro desde:</strong> <span style="color: #fff;"><?php echo htmlspecialchars($t_user['created_at']); ?></span></p>
-                            <p style="font-size: 0.9rem; color: #9ca3af;"><strong>Color Temático Preferido:</strong> <span style="color: <?php echo htmlspecialchars($t_user['theme_color']); ?>;"><?php echo htmlspecialchars($t_user['theme_color']); ?></span></p>
+                        <div class="form-group">
+                            <label>Correo Electrónico</label>
+                            <input type="email" name="reactivate_email" class="form-control" required>
                         </div>
-                    <?php else: ?>
-                        <div class="alert alert-error">Acceso Restringido o Usuario No Encontrado (Error 403/404).</div>
-                    <?php endif; ?>
-                    <div style="margin-top: 1.5rem; text-align: center;">
-                        <a href="?view=profile" class="btn btn-outline">Volver a Mi Panel</a>
-                    </div>
+                        <div class="form-group">
+                            <label>Contraseña</label>
+                            <input type="password" name="reactivate_password" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Reactivar Mi Cuenta</button>
+                    </form>
                 </div>
             <?php elseif ($action === 'consultation'): ?>
                 <div class="glass-card" style="margin: 0 auto; width: 100%;">
                     <div class="badge-status">Centro de Reportes</div>
-                    <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1rem; color: #fff;">Consulta de Ciberseguridad</h2>
-                    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Reporta anomalías, brechas o solicita asesoría técnica especializada. Esta sección cuenta con rate-limiting activo contra flood.</p>
+                    <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1.0rem; color: #fff;">Consulta de Ciberseguridad</h2>
                     <form action="?view=consultation" method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="consultation">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
@@ -778,11 +768,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Asunto / Vector Analizado</label>
-                            <input type="text" name="subject" class="form-control" required placeholder="">
+                            <input type="text" name="subject" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Descripción Detallada del Incidente</label>
-                            <textarea name="message" class="form-control" rows="4" required placeholder=""></textarea>
+                            <textarea name="message" class="form-control" rows="4" required></textarea>
                         </div>
                         <div class="form-group">
                             <label>Adjuntar Archivo de Soporte (PDF, Word)</label>
@@ -813,15 +803,15 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         
                         <div class="form-group">
                             <label>Correo Electrónico</label>
-                            <input type="email" name="login_id" class="form-control" required placeholder="">
+                            <input type="email" name="login_id" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Contraseña de Acceso</label>
-                            <input type="password" name="password" class="form-control" required placeholder="">
+                            <input type="password" name="password" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Pregunta de Seguridad (Verificación)</label>
-                            <input type="text" name="sec_answer_1" class="form-control" placeholder="">
+                            <input type="text" name="sec_answer_1" class="form-control">
                         </div>
                         <div class="form-group" id="admin-extra-q" style="display:none;">
                             <label style="color: #eab308;">[Admin Root] Pregunta 2 y 3</label>
@@ -830,7 +820,10 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Autenticarse</button>
                     </form>
-                    <a href="?view=recover" class="link-sub" style="text-align: center;">¿Olvidó su contraseña? Recupérela con su Hash</a>
+                    <div style="margin-top: 1.5rem; text-align: center; display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <a href="?view=login" class="link-sub" style="color: var(--theme-color);">¿Ya tienes cuenta? Iniciar Sesión</a>
+                        <a href="?view=recover" class="link-sub" style="color: #eab308;">¿Olvidaste tu contraseña?</a>
+                    </div>
                 </div>
                 <script>
                     document.querySelector('input[name="login_id"]').addEventListener('blur', function() {
@@ -850,11 +843,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div style="display: flex; gap: 1rem;">
                             <div class="form-group" style="flex: 1;">
                                 <label>Nombre</label>
-                                <input type="text" name="nombre" class="form-control" required placeholder="">
+                                <input type="text" name="nombre" class="form-control" required>
                             </div>
                             <div class="form-group" style="flex: 1;">
                                 <label>Apellido</label>
-                                <input type="text" name="apellido" class="form-control" required placeholder="">
+                                <input type="text" name="apellido" class="form-control" required>
                             </div>
                         </div>
                         <div class="form-group">
@@ -881,26 +874,24 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <label>Respuesta de Seguridad 1</label>
                             <input type="text" name="sec_answer_1" class="form-control" required>
                         </div>
-                        <input type="hidden" name="sec_question_2" value="">
-                        <input type="hidden" name="sec_answer_2" value="">
-                        <input type="hidden" name="sec_question_3" value="">
-                        <input type="hidden" name="sec_answer_3" value="">
-
                         <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Registrar Cuenta y Generar Hash</button>
                     </form>
+                    <div style="margin-top: 1.5rem; text-align: center; display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <a href="?view=login" class="link-sub" style="color: var(--theme-color);">¿Ya tienes cuenta? Iniciar Sesión</a>
+                        <a href="?view=recover" class="link-sub" style="color: #eab308;">¿Olvidaste tu contraseña?</a>
+                    </div>
                 </div>
             <?php elseif ($action === 'recover'): ?>
                 <div class="glass-card" style="margin: 0 auto; width: 100%;">
                     <div class="badge-status">Recuperación Criptográfica</div>
                     <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1.5rem; color: #fff;">Recuperar por Hash</h2>
-                    <p style="font-size: 0.9rem; color: #9ca3af; margin-bottom: 1.5rem;">Ingrese el Hash de un solo uso que se le proporcionó al momento de registrar su cuenta.</p>
                     <form action="?view=recover" method="POST">
                         <input type="hidden" name="action" value="recover_hash">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         
                         <div class="form-group">
                             <label>Hash de Seguridad Único</label>
-                            <input type="text" name="recovery_hash" class="form-control" required placeholder="">
+                            <input type="text" name="recovery_hash" class="form-control" required>
                         </div>
                         <button type="submit" class="btn btn-warning" style="width: 100%; margin-top: 1rem;">Validar Hash y Continuar</button>
                     </form>
@@ -958,99 +949,24 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <!-- Panel de Administración de Consultas / Historial de Usuario -->
                         <?php if ($logged_user['role'] === 'admin'): ?>
                             <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
-                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas Admin Root </h3>
+                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Gestión de Consultas Admin Root</h3>
                             <div style="max-height: 450px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                                 <?php 
                                 $consultas = $db->query("SELECT * FROM security_consultations ORDER BY created_at DESC");
                                 while($c = $consultas->fetch(PDO::FETCH_ASSOC)):
                                 ?>
-                                    <div style="background: rgba(3,7,18,0.8); padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                                    <div id="consultation-item-<?php echo $c['id']; ?>" style="background: rgba(3,7,18,0.8); padding: 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); position:relative;">
+                                        <button type="button" onclick="eliminarConsultaAdmin(<?php echo $c['id']; ?>)" style="position:absolute; top:10px; right:10px; background:transparent; border:none; color:#ef4444; cursor:pointer; font-weight:bold;">✖</button>
                                         <p style="font-size: 0.8rem; color: #eab308;">De: <?php echo htmlspecialchars($c['email']); ?> [IP: <?php echo htmlspecialchars($c['ip_address']); ?>]</p>
                                         <p style="font-size: 0.85rem; font-weight: 600; color: #fff; margin: 0.2rem 0;"><?php echo htmlspecialchars($c['subject']); ?></p>
                                         <p style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 0.5rem;"><?php echo htmlspecialchars($c['message']); ?></p>
-                                        
-                                        <!-- Previsualización del archivo enviado por el usuario -->
-                                        <?php if (!empty($c['user_file_path']) && file_exists(__DIR__ . '/' . $c['user_file_path'])): ?>
-                                            <div style="margin: 0.8rem 0; background: rgba(0,0,0,0.5); padding: 0.5rem; border-radius: 4px;">
-                                                <p style="font-size: 0.75rem; color: var(--theme-color); margin-bottom: 0.3rem;">Archivo del usuario: <?php echo htmlspecialchars($c['user_file_name']); ?></p>
-                                                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                                                    <a href="<?php echo htmlspecialchars($c['user_file_path']); ?>" download="<?php echo htmlspecialchars($c['user_file_name']); ?>" class="btn btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.6rem; text-decoration: none;">[↓] Descargar</a>
-                                                </div>
-                                                <iframe src="<?php echo htmlspecialchars($c['user_file_path']); ?>" style="width: 100%; height: 180px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;" title="Previsualización documento"></iframe>
-                                            </div>
-                                        <?php endif; ?>
-
-                                        <?php if (!empty($c['response'])): ?>
-                                            <p style="font-size: 0.8rem; color: #10b981; background: rgba(16,185,129,0.1); padding: 0.4rem; border-radius: 4px; margin-bottom: 0.5rem;"><strong>Respuesta Admin:</strong> <?php echo htmlspecialchars($c['response']); ?></p>
-                                            <?php if (!empty($c['admin_file_path']) && file_exists(__DIR__ . '/' . $c['admin_file_path'])): ?>
-                                                <div style="margin-bottom: 0.5rem;">
-                                                    <a href="<?php echo htmlspecialchars($c['admin_file_path']); ?>" download="<?php echo htmlspecialchars($c['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none;">
-                                                        [↓] Descargar Adjunto Admin: <?php echo htmlspecialchars($c['admin_file_name']); ?>
-                                                    </a>
-                                                </div>
-                                            <?php endif; ?>
-                                        <?php else: ?>
-                                            <form action="?view=profile" method="POST" enctype="multipart/form-data" style="margin-top: 0.8rem;">
-                                                <input type="hidden" name="action" value="respond_consultation">
-                                                <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
-                                                <input type="hidden" name="consultation_id" value="<?php echo $c['id']; ?>">
-                                                
-                                                <textarea name="response" class="form-control" style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required></textarea>
-                                                
-                                                <div class="form-group" style="margin-bottom: 0.5rem;">
-                                                    <label style="font-size: 0.75rem;">Adjuntar Archivo de Respuesta (PDF, Word):</label>
-                                                    <input type="file" name="admin_file" class="form-control" accept=".pdf, .doc, .docx" style="font-size: 0.75rem; padding: 0.3rem;">
-                                                </div>
-
-                                                <button type="submit" class="btn btn-primary" style="padding: 0.3rem 0.8rem; font-size: 0.75rem;">Enviar Respuesta y Archivo</button>
-                                            </form>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endwhile; ?>
-                            </div>
-                        <?php else: ?>
-                            <hr style="border:0; border-top:1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
-                            <h3 style="font-family: 'Orbitron'; font-size: 1.1rem; color: var(--theme-color); margin-bottom: 1rem;">Mis Consultas y Archivos Compartidos</h3>
-                            <div style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
-                                <?php 
-                                $stmt_mis_consultas = $db->prepare("SELECT * FROM security_consultations WHERE user_id = ? OR email = ? ORDER BY created_at DESC");
-                                $stmt_mis_consultas->execute([$logged_user['id'], $logged_user['email']]);
-                                while($mc = $stmt_mis_consultas->fetch(PDO::FETCH_ASSOC)):
-                                ?>
-                                    <div style="background: rgba(3,7,18,0.8); padding: 1rem; border-radius: 6px; border: 1px solid rgba(6,182,212,0.2);">
-                                        <p style="font-size: 0.8rem; color: #9ca3af;">Asunto: <strong><?php echo htmlspecialchars($mc['subject']); ?></strong></p>
-                                        <p style="font-size: 0.85rem; color: #fff; margin: 0.3rem 0;">Tu consulta: <?php echo htmlspecialchars($mc['message']); ?></p>
-                                        
-                                        <?php if (!empty($mc['user_file_path']) && file_exists(__DIR__ . '/' . $mc['user_file_path'])): ?>
-                                            <div style="margin: 0.5rem 0; font-size: 0.75rem; color: var(--theme-color);">
-                                                Tu archivo adjunto: <a href="<?php echo htmlspecialchars($mc['user_file_path']); ?>" download="<?php echo htmlspecialchars($mc['user_file_name']); ?>" style="color: #fff; text-decoration: underline;"><?php echo htmlspecialchars($mc['user_file_name']); ?></a>
-                                            </div>
-                                        <?php endif; ?>
-
-                                        <?php if (!empty($mc['response'])): ?>
-                                            <div style="margin-top: 0.8rem; background: rgba(16,185,129,0.1); border: 1px solid #10b981; padding: 0.6rem; border-radius: 4px;">
-                                                <p style="font-size: 0.85rem; color: #10b981; margin-bottom: 0.5rem;"><strong>Respuesta del Administrador:</strong> <?php echo htmlspecialchars($mc['response']); ?></p>
-                                                
-                                                <?php if (!empty($mc['admin_file_path']) && file_exists(__DIR__ . '/' . $mc['admin_file_path'])): ?>
-                                                    <div style="margin-top: 0.5rem;">
-                                                        <a href="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" download="<?php echo htmlspecialchars($mc['admin_file_name']); ?>" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.4rem 0.8rem; text-decoration: none; margin-bottom: 0.5rem; display: inline-block;">
-                                                            [↓] Descargar Archivo del Admin: <?php echo htmlspecialchars($mc['admin_file_name']); ?>
-                                                        </a>
-                                                        <iframe src="<?php echo htmlspecialchars($mc['admin_file_path']); ?>" style="width: 100%; height: 180px; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px;" title="Previsualizador documento admin"></iframe>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </div>
-                                        <?php else: ?>
-                                            <p style="font-size: 0.75rem; color: #eab308; margin-top: 0.5rem;">[⏳] Estado: Pendiente de respuesta por el equipo de analistas.</p>
-                                        <?php endif; ?>
                                     </div>
                                 <?php endwhile; ?>
                             </div>
                         <?php endif; ?>
-
                     </div>
 
-                    <!-- Tarjeta Derecha: Editor de Datos y Configuración -->
+                    <!-- Tarjeta Derecha: Editor de Datos, Zona de Peligro y Chat -->
                     <div class="glass-card" style="max-width: 100%;">
                         <div class="badge-status">Hardening de Cuenta</div>
                         <h2 style="font-family: 'Orbitron'; font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff;">Configuración de Perfil</h2>
@@ -1095,15 +1011,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label>Pregunta de Seguridad 1</label>
-                                <input type="text" name="sec_question_1" class="form-control" value="<?php echo htmlspecialchars($logged_user['sec_question_1']); ?>">
-                            </div>
-                            <div class="form-group">
-                                <label>Nueva Respuesta 1 (Opcional)</label>
-                                <input type="text" name="sec_answer_1" class="form-control">
-                            </div>
-
                             <div class="form-group" style="display: flex; align-items: center; gap: 0.8rem; margin-top: 1rem;">
                                 <input type="checkbox" name="ddos_protection" id="ddos_toggle" value="1" <?php echo $logged_user['ddos_protection'] ? 'checked' : ''; ?> style="width: 18px; height: 18px; accent-color: var(--theme-color);">
                                 <label for="ddos_toggle" style="margin-bottom: 0; cursor: pointer; color: #fff;">Activar Escudo Anti-DDoS Avanzado en Sesión</label>
@@ -1111,6 +1018,13 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
                             <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1.5rem;">Guardar Cambios y Blindaje</button>
                         </form>
+
+                        <hr style="border:0; border-top:1px solid rgba(239,68,68,0.3); margin: 2rem 0;">
+                        <h3 style="font-family: 'Orbitron'; color: #ef4444; margin-bottom: 1rem;">Zona de Peligro (Desactivar / Eliminar Cuenta)</h3>
+                        <div style="display: flex; gap: 1rem;">
+                            <button type="button" onclick="mostrarModal3D('deactivate')" class="btn btn-warning" style="flex:1;">Desactivar Cuenta</button>
+                            <button type="button" onclick="mostrarModal3D('delete')" class="btn" style="flex:1; background:#ef4444; color:#fff;">Eliminar Cuenta</button>
+                        </div>
 
                         <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
                         
@@ -1155,6 +1069,59 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </form>
                     </div>
                 </div>
+
+                <!-- Modal 3D de Confirmación para Desactivar/Eliminar -->
+                <div id="modal-3d-confirm" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(3,7,18,0.85); backdrop-filter:blur(8px); z-index:999; align-items:center; justify-content:center;">
+                    <div class="glass-card" style="transform: perspective(800px) rotateX(5deg); border-color:#ef4444; max-width:400px; width:100%;">
+                        <h3 id="modal-title" style="font-family:'Orbitron'; color:#ef4444; margin-bottom:1rem;">¿Estás seguro?</h3>
+                        <p id="modal-desc" style="font-size:0.85rem; color:#9ca3af; margin-bottom:1rem;"></p>
+                        <form id="modal-form" method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
+                            <div class="form-group">
+                                <label>Confirma tu Contraseña:</label>
+                                <input type="password" name="confirm_password" class="form-control" required>
+                            </div>
+                            <div style="display:flex; gap:1rem; margin-top:1rem;">
+                                <button type="submit" id="modal-submit-btn" class="btn" style="background:#ef4444; color:#fff; flex:1;">Confirmar</button>
+                                <button type="button" onclick="cerrarModal3D()" class="btn btn-outline" style="flex:1;">Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <script>
+                function mostrarModal3D(tipo) {
+                    const modal = document.getElementById('modal-3d-confirm');
+                    const title = document.getElementById('modal-title');
+                    const desc = document.getElementById('modal-desc');
+                    const form = document.getElementById('modal-form');
+                    
+                    // Limpiar input hidden previo si existe
+                    let existingInput = form.querySelector('input[name="action"]');
+                    if(existingInput) existingInput.remove();
+
+                    modal.style.display = 'flex';
+                    let inputAct = document.createElement('input');
+                    inputAct.type = 'hidden';
+                    inputAct.name = 'action';
+
+                    if(tipo === 'deactivate') {
+                        title.innerText = '¿Estás seguro de desactivar tu cuenta?';
+                        desc.innerText = 'La cuenta quedará inactiva hasta que decidas reactivarla utilizando tu correo y contraseña.';
+                        form.action = '?view=profile';
+                        inputAct.value = 'deactivate_account';
+                    } else {
+                        title.innerText = '¿Estás seguro de eliminar tu cuenta?';
+                        desc.innerText = 'Esta acción requiere contraseña obligatoria y aplicará restricciones de acceso 403 permanentes.';
+                        form.action = '?view=profile';
+                        inputAct.value = 'delete_account';
+                    }
+                    form.appendChild(inputAct);
+                }
+                function cerrarModal3D() {
+                    document.getElementById('modal-3d-confirm').style.display = 'none';
+                }
+                </script>
             <?php endif; ?>
         </main>
 
@@ -1228,28 +1195,9 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 }).catch(err => {});
         }
 
-        function enviarMensaje() {
-            let inputElem = document.getElementById('chat-input');
-            if(!inputElem) return;
-            let msg = inputElem.value;
-            if(!msg) return;
-            let formData = new FormData();
-            formData.append('message', msg);
-            formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
-            
-            fetch('chat_backend.php', { method: 'POST', body: formData })
-                .then(() => {
-                    inputElem.value = '';
-                    cargarChat();
-                }).catch(err => {});
-        }
-
         if(document.getElementById('chat-box')) {
             setInterval(cargarChat, 3000);
             cargarChat();
-        }
-        function verPerfilUsuario(userId) {
-            window.location.href = '?view=view_user_profile&id=' + userId;
         }
 
         function insertarEmoji(selectObj) {
@@ -1327,6 +1275,33 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     fileInput.value = '';
                     cargarChat();
                 });
+        }
+
+        function eliminarConsultaAdmin(id) {
+            if(confirm("¿Estás seguro de eliminar esta consulta con confirmación 3D?")) {
+                let formData = new FormData();
+                formData.append('action', 'delete_consultation_admin');
+                formData.append('consultation_id', id);
+                formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+
+                fetch('index.php', { method: 'POST', body: formData })
+                    .then(() => {
+                        let elem = document.getElementById('consultation-item-' + id);
+                        if(elem) elem.remove();
+                    });
+            }
+        }
+
+        function eliminarMensajeChat(chatId) {
+            if(confirm("¿Deseas eliminar este chat/consulta en pantalla 3D?")) {
+                let formData = new FormData();
+                formData.append('action', 'delete_chat_message');
+                formData.append('chat_id', chatId);
+                formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+                
+                fetch('chat_backend.php', { method: 'POST', body: formData })
+                    .then(() => { cargarChat(); });
+            }
         }
     </script>
 </body>
