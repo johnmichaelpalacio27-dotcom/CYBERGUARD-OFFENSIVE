@@ -707,7 +707,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 <div class="content-section">
                     <div class="badge-status">Sobre CyberGuard</div>
                     <h1>Arquitectura de <span>Defensa Total</span></h1>
-                    <p>CyberGuard Offensive[cite: 4] es un entorno simulado de pruebas de penetración y control de accesos diseñado bajo los más estrictos lineamientos de seguridad defensiva. Nuestro motor integra contramedidas frente a inyecciones SQL, ataques de fuerza bruta con retardos exponenciales, protección contra falsificación de peticiones en sitios cruzados (CSRF) y gestión cifrada de contraseñas.</p>
+                    <p>CyberGuard Offensive es un entorno simulado de pruebas de penetración y control de accesos diseñado bajo los más estrictos lineamientos de seguridad defensiva. Nuestro motor integra contramedidas frente a inyecciones SQL, ataques de fuerza bruta con retardos exponenciales, protección contra falsificación de peticiones en sitios cruzados (CSRF) y gestión cifrada de contraseñas.</p>
                     <p>Contamos con herramientas automatizadas de auditoría y un panel centralizado para administradores y analistas de seguridad enfocados en la mitigación de vectores de ataque complejos.</p>
                     <div class="cta-group" style="margin-top: 2rem;">
                         <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
@@ -728,11 +728,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Asunto / Vector Analizado</label>
-                            <input type="text" name="subject" class="form-control" required placeholder="Ej: Vulnerabilidad IDOR en módulo X">
+                            <input type="text" name="subject" class="form-control" required placeholder="">
                         </div>
                         <div class="form-group">
                             <label>Descripción Detallada del Incidente</label>
-                            <textarea name="message" class="form-control" rows="4" required placeholder="Describa el comportamiento observado "></textarea>
+                            <textarea name="message" class="form-control" rows="4" required placeholder=""></textarea>
                         </div>
                         <div class="form-group">
                             <label>Adjuntar Archivo de Soporte (PDF, Word)</label>
@@ -763,15 +763,15 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         
                         <div class="form-group">
                             <label>Correo Electrónico</label>
-                            <input type="email" name="login_id" class="form-control" required placeholder="analista@cyberguard.com">
+                           <input type="email" name="login_id" class="form-control" required placeholder="">
                         </div>
                         <div class="form-group">
                             <label>Contraseña de Acceso</label>
-                            <input type="password" name="password" class="form-control" required placeholder="••••••••">
+                           <input type="password" name="password" class="form-control" required placeholder="">
                         </div>
                         <div class="form-group">
                             <label>Pregunta de Seguridad (Verificación)</label>
-                            <input type="text" name="sec_answer_1" class="form-control" placeholder="Respuesta a su pregunta de seguridad">
+                            <input type="text" name="sec_answer_1" class="form-control" placeholder="">
                         </div>
                         <div class="form-group" id="admin-extra-q" style="display:none;">
                             <label style="color: #eab308;">[Admin Root] Pregunta 2 y 3</label>
@@ -800,11 +800,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div style="display: flex; gap: 1rem;">
                             <div class="form-group" style="flex: 1;">
                                 <label>Nombre</label>
-                                <input type="text" name="nombre" class="form-control" required placeholder="John">
+                              <input type="text" name="nombre" class="form-control" required placeholder="">
                             </div>
                             <div class="form-group" style="flex: 1;">
                                 <label>Apellido</label>
-                                <input type="text" name="apellido" class="form-control" required placeholder="Palacio">
+                                <input type="text" name="apellido" class="form-control" required placeholder="">
                             </div>
                         </div>
                         <div class="form-group">
@@ -850,7 +850,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         
                         <div class="form-group">
                             <label>Hash de Seguridad Único</label>
-                            <input type="text" name="recovery_hash" class="form-control" required placeholder="Ingrese el hash alfanumérico...">
+                            <input type="text" name="recovery_hash" class="form-control" required placeholder="">
                         </div>
                         <button type="submit" class="btn btn-warning" style="width: 100%; margin-top: 1rem;">Validar Hash y Continuar</button>
                     </form>
