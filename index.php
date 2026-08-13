@@ -712,6 +712,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
         .alert-error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #fca5a5; }
         .alert-success { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #a7f3d0; }
         footer { text-align: center; padding: 1.5rem 0; color: #4b5563; font-size: 0.85rem; border-top: 1px solid rgba(255, 255, 255, 0.05); max-width: 1200px; margin: 0 auto; width: 100%; }
+        #emoji-popup-panel span:hover { background: rgba(6, 182, 212, 0.25); transform: scale(1.15); }
         @media (max-width: 768px) { .ui-layer { padding: 1.5rem; } h1 { font-size: 2.2rem; } nav { display: none; } }
     </style>
 </head>
@@ -1072,18 +1073,43 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div id="chat-box" style="height:280px; overflow-y:auto; background:rgba(3, 7, 18, 0.7); border: 1px solid rgba(6, 182, 212, 0.3); padding:1rem; border-radius:8px; margin-bottom:1rem; font-size: 0.9rem;">
                         </div>
 
-                        <!-- Barra de entrada estilo WhatsApp -->
-                        <form id="chat-form" onsubmit="enviarMensajeMultimedia(event)" style="display: flex; flex-direction: column; gap: 8px;">
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <!-- Selector de Emojis Rápidos -->
-                                <select id="emoji-picker" onchange="insertarEmoji(this)" class="form-control" style="width: 60px; padding: 0.4rem;">
-                                    <option value="">😀</option>
-                                    <option value="👍">👍</option>
-                                    <option value="🔥">🔥</option>
-                                    <option value="💻">💻</option>
-                                    <option value="⚠️">⚠️</option>
-                                    <option value="🔒">🔒</option>
-                                </select>
+                        <!-- Formulario de Chat Estilo WhatsApp con Selector de Emojis -->
+                        <form onsubmit="enviarMensajeMultimedia(event)" style="display: flex; flex-direction: column; gap: 0.8rem;">
+                            <div style="display: flex; gap: 0.5rem; align-items: center; position: relative;">
+                                
+                                <!-- Botón y Panel Flotante de Emojis -->
+                                <div style="position: relative; display: inline-block;">
+                                    <button type="button" onclick="toggleEmojiPicker()" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 1.1rem;" title="Abrir selector de emojis">😀</button>
+                                    
+                                    <div id="emoji-popup-panel" style="display: none; position: absolute; bottom: 45px; left: 0; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(6, 182, 212, 0.4); padding: 10px; border-radius: 8px; width: 260px; max-height: 200px; overflow-y: auto; z-index: 100; backdrop-filter: blur(10px); box-shadow: 0 4px 20px rgba(0,0,0,0.8);">
+                                        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; text-align: center;">
+                                            <span onclick="insertarEmojiDirecto('😀')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">😀</span>
+                                            <span onclick="insertarEmojiDirecto('😂')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">😂</span>
+                                            <span onclick="insertarEmojiDirecto('😊')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">😊</span>
+                                            <span onclick="insertarEmojiDirecto('😎')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">😎</span>
+                                            <span onclick="insertarEmojiDirecto('🤔')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🤔</span>
+                                            <span onclick="insertarEmojiDirecto('👍')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">👍</span>
+                                            <span onclick="insertarEmojiDirecto('👎')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">👎</span>
+                                            <span onclick="insertarEmojiDirecto('🔥')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🔥</span>
+                                            <span onclick="insertarEmojiDirecto('💻')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">💻</span>
+                                            <span onclick="insertarEmojiDirecto('⚡')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">⚡</span>
+                                            <span onclick="insertarEmojiDirecto('⚠️')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">⚠️</span>
+                                            <span onclick="insertarEmojiDirecto('🔒')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🔒</span>
+                                            <span onclick="insertarEmojiDirecto('🔓')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🔓</span>
+                                            <span onclick="insertarEmojiDirecto('🚀')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🚀</span>
+                                            <span onclick="insertarEmojiDirecto('💡')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">💡</span>
+                                            <span onclick="insertarEmojiDirecto('🛡️')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🛡️</span>
+                                            <span onclick="insertarEmojiDirecto('🐛')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🐛</span>
+                                            <span onclick="insertarEmojiDirecto('🎯')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🎯</span>
+                                            <span onclick="insertarEmojiDirecto('🎉')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🎉</span>
+                                            <span onclick="insertarEmojiDirecto('❤️')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">❤️</span>
+                                            <span onclick="insertarEmojiDirecto('⭐')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">⭐</span>
+                                            <span onclick="insertarEmojiDirecto('📌')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">📌</span>
+                                            <span onclick="insertarEmojiDirecto('🔍')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">🔍</span>
+                                            <span onclick="insertarEmojiDirecto('⚙️')" style="cursor: pointer; font-size: 1.2rem; padding: 4px; border-radius: 4px; transition: background 0.2s;">⚙️</span>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <!-- Campo de Texto -->
                                 <input type="text" id="chat-input" name="message" class="form-control" placeholder="Escribe un mensaje..." style="flex: 1;">
@@ -1134,7 +1160,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     const desc = document.getElementById('modal-desc');
                     const form = document.getElementById('modal-form');
                     
-                    // Limpiar input hidden previo si existe
                     let existingInput = form.querySelector('input[name="action"]');
                     if(existingInput) existingInput.remove();
 
@@ -1238,11 +1263,31 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
             cargarChat();
         }
 
-        function insertarEmoji(selectObj) {
-            let input = document.getElementById('chat-input');
-            input.value += selectObj.value;
-            selectObj.value = "";
+        function toggleEmojiPicker() {
+            const panel = document.getElementById('emoji-popup-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
         }
+
+        function insertarEmojiDirecto(emoji) {
+            const input = document.getElementById('chat-input');
+            const startPos = input.selectionStart;
+            const endPos = input.selectionEnd;
+            
+            input.value = input.value.substring(0, startPos) + emoji + input.value.substring(endPos, input.value.length);
+            
+            input.focus();
+            input.setSelectionRange(startPos + emoji.length, startPos + emoji.length);
+            document.getElementById('emoji-popup-panel').style.display = 'none';
+        }
+
+        window.addEventListener('click', function(e) {
+            const panel = document.getElementById('emoji-popup-panel');
+            if (panel && panel.style.display === 'block') {
+                if (!e.target.closest('#emoji-popup-panel') && !e.target.closest('button[onclick="toggleEmojiPicker()"]')) {
+                    panel.style.display = 'none';
+                }
+            }
+        });
 
         let mediaRecorder;
         let audioChunks = [];
