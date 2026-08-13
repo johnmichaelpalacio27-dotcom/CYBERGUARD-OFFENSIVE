@@ -144,8 +144,9 @@ function check_brute_force($action_name) {
     }
     
     if (time() < $_SESSION[$key]['lock_until']) {
-        $remaining = $_SESSION[$key]['lock_until'] - time();
-        return $remaining;
+        // Enviar cabecera 403 Forbidden
+        header("HTTP/1.1 403 Forbidden");
+        die("<h1>403 Forbidden</h1><p>Demasiados intentos. Acceso bloqueado temporalmente por seguridad.</p>");
     }
     return 0;
 }
@@ -300,26 +301,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                if (!$auth_passed) {
-                    register_failed_attempt('login');
-                    $message_type = "error";
-                    $action = 'login';
-                } else {
-                    reset_brute_force('login');
-                    session_regenerate_id(true);
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_nombre'] = $user['nombre'];
-                    
-                    header("Location: ?view=profile");
-                    exit;
-                }
-            } else {
-                register_failed_attempt('login');
-                $message = "Credenciales de acceso incorrectas.";
-                $message_type = "error";
-                $action = 'login';
-            }
+              // Dentro del bloque 'login'
+if (!$auth_passed) {
+    register_failed_attempt('login');
+    
+    // Verificamos si acabamos de entrar en bloqueo
+    $key = 'bf_login';
+    if ($_SESSION[$key]['attempts'] >= 3) {
+        header("HTTP/1.1 403 Forbidden");
+        die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
+    }
+
+    $message = "Credenciales de acceso incorrectas.";
+    $message_type = "error";
+    $action = 'login';
+}
         }
     } elseif ($form_action === 'recover_hash') {
         $lockout = check_brute_force('recover');
