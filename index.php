@@ -302,32 +302,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
               // Dentro del bloque 'login'
-                if (!$auth_passed) {
-                    register_failed_attempt('login');
-                    
-                    // Verificamos si acabamos de entrar en bloqueo
-                    $key = 'bf_login';
-                    if ($_SESSION[$key]['attempts'] >= 3) {
-                        header("HTTP/1.1 403 Forbidden");
-                        die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
-                    }
+if (!$auth_passed) {
+    register_failed_attempt('login');
+    
+    // Verificamos si acabamos de entrar en bloqueo
+    $key = 'bf_login';
+    if ($_SESSION[$key]['attempts'] >= 3) {
+        header("HTTP/1.1 403 Forbidden");
+        die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
+    }
 
-                    $message = "Credenciales de acceso incorrectas.";
-                    $message_type = "error";
-                    $action = 'login';
-                } else {
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_nombre'] = $user['nombre'];
-                    header("Location: ?view=profile");
-                    exit;
-                }
-            } else {
-                register_failed_attempt('login');
-                $message = "Credenciales de acceso incorrectas.";
-                $message_type = "error";
-                $action = 'login';
-            }
+    $message = "Credenciales de acceso incorrectas.";
+    $message_type = "error";
+    $action = 'login';
+}
         }
     } elseif ($form_action === 'recover_hash') {
         $lockout = check_brute_force('recover');
@@ -817,11 +805,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Correo Electrónico</label>
-                            <input type="email" name="email" class="form-control" required placeholder="john@cyberguard.com">
+                            <input type="email" name="email" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Contraseña Maestra</label>
-                            <input type="password" name="password" class="form-control" required placeholder="••••••••">
+                           <input type="password" name="password" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Algoritmo de Hash de Recuperación</label>
@@ -837,7 +825,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Respuesta de Seguridad 1</label>
-                            <input type="text" name="sec_answer_1" class="form-control" required placeholder="Respuesta secreta">
+                           <input type="text" name="sec_answer_1" class="form-control" required>
                         </div>
                         <input type="hidden" name="sec_question_2" value="">
                         <input type="hidden" name="sec_answer_2" value="">
@@ -953,7 +941,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                                                 <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                                                 <input type="hidden" name="consultation_id" value="<?php echo $c['id']; ?>">
                                                 
-                                                <textarea name="response" class="form-control" placeholder="Escribir respuesta oficial..." style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required></textarea>
+                                                <textarea name="response" class="form-control" style="font-size: 0.8rem; padding: 0.4rem; margin-bottom: 0.4rem;" required></textarea>
                                                 
                                                 <div class="form-group" style="margin-bottom: 0.5rem;">
                                                     <label style="font-size: 0.75rem;">Adjuntar Archivo de Respuesta (PDF, Word):</label>
@@ -1030,13 +1018,13 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             
                             <div class="form-group">
                                 <label>Nueva Contraseña (Opcional)</label>
-                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para mantener actual">
+                               <input type="password" name="password" class="form-control">
                             </div>
 
                             <?php if ($logged_user['role'] === 'admin'): ?>
                                 <div class="form-group" style="background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; padding: 1rem; border-radius: 6px;">
                                     <label style="color: #ef4444;">Contraseña de Administrador Actual (Obligatoria)</label>
-                                    <input type="password" name="current_admin_password" class="form-control" required placeholder="Ingrese su contraseña root actual">
+                                    <input type="password" name="current_admin_password" class="form-control" required>
                                 </div>
                             <?php endif; ?>
 
@@ -1059,7 +1047,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             </div>
                             <div class="form-group">
                                 <label>Nueva Respuesta 1 (Opcional)</label>
-                                <input type="text" name="sec_answer_1" class="form-control" placeholder="Nueva respuesta secreta">
+                                <input type="text" name="sec_answer_1" class="form-control">
                             </div>
 
                             <div class="form-group" style="display: flex; align-items: center; gap: 0.8rem; margin-top: 1rem;">
@@ -1076,7 +1064,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div id="chat-box" style="height:250px; overflow-y:auto; background:rgba(3, 7, 18, 0.6); border: 1px solid rgba(6, 182, 212, 0.2); padding:1rem; border-radius:8px; margin-bottom:1rem; font-size: 0.9rem;">
                         </div>
                         <div style="display: flex; gap: 10px;">
-                            <input type="text" id="chat-input" class="form-control" placeholder="Escribe un mensaje de seguridad...">
+                            <input type="text" id="chat-input" class="form-control">
                             <button onclick="enviarMensaje()" class="btn btn-primary">Enviar</button>
                         </div>
 
