@@ -165,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         die("Error de validación de seguridad (CSRF Token inválido o expirado).");
     }
 
-    // --- DESACTIVAR CUENTA ---
+   // --- DESACTIVAR CUENTA ---
     if ($form_action === 'deactivate_account') {
         if (!isset($_SESSION['user_id'])) { header("Location: ?view=login"); exit; }
         $password_confirm = $_POST['confirm_password'] ?? '';
@@ -179,18 +179,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt_up = $db->prepare("UPDATE users SET status = 'deactivated' WHERE id = ?");
             $stmt_up->execute([$_SESSION['user_id']]);
             
+            // Invalidar cookies de sesión por completo
+            $_SESSION = array();
+            if (ini_get("session.use_cookies")) {
+                $params = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000,
+                    $params["path"], $params["domain"],
+                    $params["secure"], $params["httponly"]
+                );
+            }
             session_destroy();
             header("Location: ?view=login&msg=deactivated");
             exit;
         } else {
             enforce_strict_attempts('deactivate', 3);
-            $message = "Contraseña incorrecta. Intento fallido de desactivación.";
+            $message = "Contraseña incorrecta. 403 - Intento fallido de desactivación.";
             $message_type = "error";
             $action = 'profile';
         }
     }
 
-    // --- ELIMINAR CUENTA ---
+    // --- ELIMINAR CUENTA (Borrado total de datos asociados y sesión) ---
     if ($form_action === 'delete_account') {
         if (!isset($_SESSION['user_id'])) { header("Location: ?view=login"); exit; }
         $password_confirm = $_POST['confirm_password'] ?? '';
@@ -201,11 +210,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($u && password_verify($password_confirm, $u['password'])) {
             reset_strict_attempts('delete_account');
-            $stmt_up = $db->prepare("UPDATE users SET status = 'deleted' WHERE id = ?");
-            $stmt_up->execute([$_SESSION['user_id']]);
+            $user_id_to_del = $_SESSION['user_id'];
             
+            // Borrado completo de registros relacionados para cumplir con "borre todo"
+            $db->prepare("DELETE FROM security_consultations WHERE user_id = ?")->execute([$user_id_to_del]);
+            $db->prepare("DELETE FROM live_chat WHERE user_id = ?")->execute([$user_id_to_del]);
+            $db->prepare("DELETE FROM user_files WHERE user_id = ?")->execute([$user_id_to_del]);
+            
+            // Eliminar el registro del usuario de la base de datos por completo
+            $stmt_del = $db->prepare("DELETE FROM users WHERE id = ?");
+            $stmt_del->execute([$user_id_to_del]);
+            
+            // Invalidar sesión y cookies
+            $_SESSION = array();
+            if (ini_get("session.use_cookies")) {
+                $params = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000,
+                    $params["path"], $params["domain"],
+                    $params["secure"], $params["httponly"]
+                );
+            }
             session_destroy();
-            header("Location: ?view=login&msg=deleted");
+            header("Location: ?view=login&msg=deleted_complete");
             exit;
         } else {
             enforce_strict_attempts('delete_account', 3);
@@ -341,9 +367,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($user) {
             if ($user['status'] !== 'active') {
                 enforce_strict_attempts('login_inactive', 3);
-                $message = "Acceso Denegado (403): La cuenta está desactivada o eliminada. Por favor reactívela.";
-                $message_type = "error";
-                $action = 'login';
+                header("HTTP/1.1 403 Forbidden");
+                die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: La cuenta se encuentra desactivada, eliminada o la petición es inválida. Invalide sus cookies de sesión.</p></body></html>");
             } else if (password_verify($password, $user['password'])) {
                 $auth_passed = true;
                 if ($user['role'] === 'admin') {
@@ -376,10 +401,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message_type = "error";
         $action = 'login';
     } elseif ($form_action === 'recover_hash') {
+        enforce_strict_attempts('recover_brute_force', 3);
         $recovery_hash = trim($_POST['recovery_hash']);
 
         if (empty($recovery_hash)) {
-            $message = "Por favor ingrese el Hash de seguridad de su perfil.";
+            $message = "Por favor espere a que se genere un hash válido o ingrese el código correspondiente.";
             $message_type = "error";
             $action = 'recover';
         } else {
@@ -388,12 +414,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user) {
+                reset_strict_attempts('recover_brute_force');
+                if ($user['status'] === 'deactivated') {
+                    $stmt_reactivate = $db->prepare("UPDATE users SET status = 'active' WHERE id = ?");
+                    $stmt_reactivate->execute([$user['id']]);
+                }
+
                 $_SESSION['recovery_user_id'] = $user['id'];
                 header("Location: ?view=reset_password");
                 exit;
             } else {
-                enforce_strict_attempts('recover', 3);
-                $message = "El Hash ingresado es inválido o no pertenece a ningún perfil activo.";
+                $message = "Espere que se genere un hash válido o ingrese el hash correcto. Credencial no encontrada.";
                 $message_type = "error";
                 $action = 'recover';
             }
@@ -488,8 +519,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             reset_strict_attempts('update_profile_admin');
         }
         
-        $q1 = trim($_POST['sec_question_1']);
-        $a1 = trim($_POST['sec_answer_1']);
+        $q1 = trim($_POST['sec_question_1'] ?? '');
+        $a1 = trim($_POST['sec_answer_1'] ?? '');
         
         $profile_pic_path = null;
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
@@ -589,6 +620,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = "Por favor complete todos los campos obligatorios de la consulta.";
             $message_type = "error";
             $action = 'consultation';
+        }
+    } elseif ($form_action === 'delete_consultation_admin') {
+        if (!isset($_SESSION['user_id'])) { exit; }
+        $stmt_rol = $db->prepare("SELECT role FROM users WHERE id = ?");
+        $stmt_rol->execute([$_SESSION['user_id']]);
+        $current_user_check = $stmt_rol->fetch(PDO::FETCH_ASSOC);
+
+        if ($current_user_check && $current_user_check['role'] === 'admin') {
+            $consultation_id = $_POST['consultation_id'] ?? 0;
+            $db->prepare("DELETE FROM security_consultations WHERE id = ?")->execute([$consultation_id]);
+            exit;
         }
     }
 }
@@ -883,17 +925,18 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 </div>
             <?php elseif ($action === 'recover'): ?>
                 <div class="glass-card" style="margin: 0 auto; width: 100%;">
-                    <div class="badge-status">Recuperación Criptográfica</div>
-                    <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1.5rem; color: #fff;">Recuperar por Hash</h2>
+                    <div class="badge-status">Recuperación Criptográfica &bull; Anti Fuerza Bruta (403)</div>
+                    <h2 style="font-family: 'Orbitron'; font-size: 1.8rem; margin-bottom: 1.5rem; color: #fff;">Recuperar Cuenta</h2>
+                    <p style="font-size: 0.85rem; color: #9ca3af; margin-bottom: 1.2rem;">Espere que se genere un hash válido en su sistema, ingrese el hash y proceda a cambiar su contraseña de forma segura.</p>
                     <form action="?view=recover" method="POST">
                         <input type="hidden" name="action" value="recover_hash">
                         <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['csrf_token']; ?>">
                         
                         <div class="form-group">
-                            <label>Hash de Seguridad Único</label>
-                            <input type="text" name="recovery_hash" class="form-control" required>
+                            <label>Hash de Seguridad Único / Recuperación</label>
+                            <input type="text" name="recovery_hash" class="form-control" required placeholder="Ingrese el hash generado...">
                         </div>
-                        <button type="submit" class="btn btn-warning" style="width: 100%; margin-top: 1rem;">Validar Hash y Continuar</button>
+                        <button type="submit" class="btn btn-warning" style="width: 100%; margin-top: 1rem;">Validar Hash (Protección 403 Activa)</button>
                     </form>
                 </div>
             <?php elseif ($action === 'reset_password'): ?>
@@ -1096,7 +1139,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     const desc = document.getElementById('modal-desc');
                     const form = document.getElementById('modal-form');
                     
-                    // Limpiar input hidden previo si existe
                     let existingInput = form.querySelector('input[name="action"]');
                     if(existingInput) existingInput.remove();
 
@@ -1112,7 +1154,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         inputAct.value = 'deactivate_account';
                     } else {
                         title.innerText = '¿Estás seguro de eliminar tu cuenta?';
-                        desc.innerText = 'Esta acción requiere contraseña obligatoria y aplicará restricciones de acceso 403 permanentes.';
+                        desc.innerText = 'Esta acción requiere contraseña obligatoria y aplicará restricciones de acceso 403 permanentes con borrado completo.';
                         form.action = '?view=profile';
                         inputAct.value = 'delete_account';
                     }
