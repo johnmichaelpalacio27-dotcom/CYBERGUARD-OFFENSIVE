@@ -162,9 +162,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form_action = isset($_POST['action']) ? $_POST['action'] : '';
 
     if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-        die("Error de validación de seguridad (CSRF Token inválido o expirado).");
+        header("HTTP/1.1 403 Forbidden");
+        die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Petición inválida o expirada.</p></body></html>");
     }
-
+    
    // --- DESACTIVAR CUENTA ---
     if ($form_action === 'deactivate_account') {
         if (!isset($_SESSION['user_id'])) { header("Location: ?view=login"); exit; }
@@ -268,8 +269,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($form_action === 'respond_consultation') {
         if (!isset($_SESSION['user_id'])) {
-            header("Location: ?view=login");
-            exit;
+            header("HTTP/1.1 403 Forbidden");
+            die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Sesión de analista no iniciada.</p></body></html>");
         }
         
         $stmt_rol = $db->prepare("SELECT role FROM users WHERE id = ?");
@@ -320,8 +321,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $action = 'profile';
             }
         } else {
-            die("Acceso no autorizado.");
-        }
+          header("HTTP/1.1 403 Forbidden");
+          die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Privilegios de Administrador Root requeridos.</p></body></html>");
+      } 
     } elseif ($form_action === 'register') {
         $nombre = trim($_POST['nombre']);
         $apellido = trim($_POST['apellido']);
@@ -401,7 +403,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message_type = "error";
         $action = 'login';
     } elseif ($form_action === 'recover_hash') {
+        // Protección 403 contra Fuerza Bruta en la recuperación
         enforce_strict_attempts('recover_brute_force', 3);
+
         $recovery_hash = trim($_POST['recovery_hash']);
 
         if (empty($recovery_hash)) {
@@ -415,6 +419,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($user) {
                 reset_strict_attempts('recover_brute_force');
+                
+                // Si la cuenta estaba desactivada, la reactivamos por completo al usar el correo/hash de recuperación
                 if ($user['status'] === 'deactivated') {
                     $stmt_reactivate = $db->prepare("UPDATE users SET status = 'active' WHERE id = ?");
                     $stmt_reactivate->execute([$user['id']]);
@@ -431,8 +437,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($form_action === 'reset_password_new') {
         if (!isset($_SESSION['recovery_user_id'])) {
-            header("Location: ?view=home");
-            exit;
+            header("HTTP/1.1 403 Forbidden");
+            die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Contexto de recuperación criptográfica no válido o expirado.</p></body></html>");
         }
         $rec_user_id = $_SESSION['recovery_user_id'];
         $new_pass = $_POST['new_password'];
@@ -468,8 +474,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($form_action === 'generate_new_hash') {
         if (!isset($_SESSION['user_id'])) {
-            header("Location: ?view=login");
-            exit;
+            header("HTTP/1.1 403 Forbidden");
+            die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Sesión de analista no iniciada.</p></body></html>");
         }
         $user_id = $_SESSION['user_id'];
         $desired_type = $_POST['hash_type'] ?? 'sha256';
@@ -491,8 +497,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = 'profile';
     } elseif ($form_action === 'update_profile') {
         if (!isset($_SESSION['user_id'])) {
-            header("Location: ?view=login");
-            exit;
+            header("HTTP/1.1 403 Forbidden");
+            die("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>403 Forbidden</title><style>body{background:#030712;color:#ef4444;font-family:sans-serif;text-align:center;padding-top:20vh;}</style></head><body><h1>403 Forbidden</h1><p>Acceso Denegado: Sesión de analista no iniciada.</p></body></html>");
         }
         $user_id = $_SESSION['user_id'];
         
@@ -519,8 +525,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             reset_strict_attempts('update_profile_admin');
         }
         
-        $q1 = trim($_POST['sec_question_1'] ?? '');
-        $a1 = trim($_POST['sec_answer_1'] ?? '');
+        $q1 = trim($_POST['sec_question_1']);
+        $a1 = trim($_POST['sec_answer_1']);
         
         $profile_pic_path = null;
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
@@ -620,17 +626,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = "Por favor complete todos los campos obligatorios de la consulta.";
             $message_type = "error";
             $action = 'consultation';
-        }
-    } elseif ($form_action === 'delete_consultation_admin') {
-        if (!isset($_SESSION['user_id'])) { exit; }
-        $stmt_rol = $db->prepare("SELECT role FROM users WHERE id = ?");
-        $stmt_rol->execute([$_SESSION['user_id']]);
-        $current_user_check = $stmt_rol->fetch(PDO::FETCH_ASSOC);
-
-        if ($current_user_check && $current_user_check['role'] === 'admin') {
-            $consultation_id = $_POST['consultation_id'] ?? 0;
-            $db->prepare("DELETE FROM security_consultations WHERE id = ?")->execute([$consultation_id]);
-            exit;
         }
     }
 }
@@ -1139,6 +1134,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                     const desc = document.getElementById('modal-desc');
                     const form = document.getElementById('modal-form');
                     
+                    // Limpiar input hidden previo si existe
                     let existingInput = form.querySelector('input[name="action"]');
                     if(existingInput) existingInput.remove();
 
@@ -1154,7 +1150,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         inputAct.value = 'deactivate_account';
                     } else {
                         title.innerText = '¿Estás seguro de eliminar tu cuenta?';
-                        desc.innerText = 'Esta acción requiere contraseña obligatoria y aplicará restricciones de acceso 403 permanentes con borrado completo.';
+                        desc.innerText = 'Esta acción requiere contraseña obligatoria y aplicará restricciones de acceso 403 permanentes.';
                         form.action = '?view=profile';
                         inputAct.value = 'delete_account';
                     }
