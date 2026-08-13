@@ -2,7 +2,7 @@
 // --- CONFIGURACIÓN DE SESIÓN Y SEGURIDAD ROBUSTA (HTTPOnly, Secure, Strict Mode) ---
 if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_httponly', 1);
-    ini_set('session.cookie_secure', 0); // Cambiar a 1 si usas HTTPS real
+    ini_set('session.cookie_secure', 1); // Cambiar a 1 si usas HTTPS real
     ini_set('session.use_strict_mode', 1);
     ini_set('session.cookie_samesite', 'Strict');
     session_start();
@@ -45,7 +45,7 @@ try {
     $db = new PDO('sqlite:' . $db_file);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Inicializar tablas necesarias con campos actualizados
+    // En la sección de inicialización de tablas de tu base de datos SQLite:
     $db->exec("CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
@@ -53,6 +53,7 @@ try {
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         single_use_hash TEXT DEFAULT '',
+        public_user_hash TEXT DEFAULT '', -- Añadido para enmascarar la ID en chats y perfiles públicos
         hash_type TEXT DEFAULT 'sha256',
         hash_used INTEGER DEFAULT 0,
         hash_security_active INTEGER DEFAULT 1,
@@ -96,6 +97,7 @@ try {
         file_type TEXT DEFAULT 'text',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+    
     // Tabla para Archivos de Usuario (Subidas y Descargas)
     $db->exec("CREATE TABLE IF NOT EXISTS user_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +147,6 @@ function check_brute_force($action_name) {
     }
     
     if (time() < $_SESSION[$key]['lock_until']) {
-        // Enviar cabecera 403 Forbidden
         header("HTTP/1.1 403 Forbidden");
         die("<h1>403 Forbidden</h1><p>Demasiados intentos. Acceso bloqueado temporalmente por seguridad.</p>");
     }
@@ -314,7 +315,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             register_failed_attempt('login');
             
-            // Verificamos si acabamos de entrar en bloqueo
             $key = 'bf_login';
             if ($_SESSION[$key]['attempts'] >= 3) {
                 header("HTTP/1.1 403 Forbidden");
@@ -719,14 +719,28 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 </div>
             <?php elseif ($action === 'view_user_profile'): ?>
                 <?php 
-                // Vista pública del perfil de otro usuario (Vulnerable a IDOR intencional para pruebas con Burp Suite)
+                if (!isset($_SESSION['user_id'])) {
+                    header("HTTP/1.1 403 Forbidden");
+                    die("<h1>403 Forbidden</h1><p>Acceso denegado. Debe iniciar sesión.</p>");
+                }
+
                 $target_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-                $stmt_target = $db->prepare("SELECT id, nombre, apellido, email, profile_pic, theme_color, created_at, role FROM users WHERE id = ?");
-                $stmt_target->execute([$target_id]);
+                
+                $stmt_current = $db->prepare("SELECT role FROM users WHERE id = ?");
+                $stmt_current->execute([$_SESSION['user_id']]);
+                $curr_user_data = $stmt_current->fetch(PDO::FETCH_ASSOC);
+
+                if ($curr_user_data['role'] !== 'admin' && $_SESSION['user_id'] !== $target_id) {
+                    header("HTTP/1.1 403 Forbidden");
+                    die("<h1>403 Forbidden</h1><p>No tienes autorización para visualizar este perfil (IDOR bloqueado).</p>");
+                }
+
+                $stmt_target = $db->prepare("SELECT id, nombre, apellido, email, profile_pic, theme_color, created_at, role, public_user_hash FROM users WHERE id = ?");
+                $stmt_target.execute([$target_id]);
                 $t_user = $stmt_target->fetch(PDO::FETCH_ASSOC);
                 ?>
                 <div class="glass-card" style="margin: 0 auto; width: 100%; max-width: 600px;">
-                    <div class="badge-status">Perfil Público de Usuario [IDOR Audit Ready]</div>
+                    <div class="badge-status">Perfil Público Verificado [Blindado contra IDOR]</div>
                     <?php if ($t_user): ?>
                         <div class="avatar-3d-box">
                             <?php if (!empty($t_user['profile_pic']) && file_exists(__DIR__ . '/' . $t_user['profile_pic'])): ?>
@@ -736,15 +750,14 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <?php endif; ?>
                         </div>
                         <h2 style="font-family: 'Orbitron'; text-align: center; color: #fff;"><?php echo htmlspecialchars($t_user['nombre'] . ' ' . $t_user['apellido']); ?></h2>
-                        <p style="text-align: center; color: var(--theme-color); font-size: 0.9rem; margin-bottom: 1.5rem;">ID de Cuenta: #<?php echo htmlspecialchars($t_user['id']); ?> &bull; Rol: <?php echo htmlspecialchars($t_user['role']); ?></p>
+                        <p style="text-align: center; color: var(--theme-color); font-size: 0.9rem; margin-bottom: 1.5rem;">Hash ID: #<?php echo htmlspecialchars($t_user['public_user_hash']); ?> &bull; Rol: <?php echo htmlspecialchars($t_user['role']); ?></p>
                         
                         <div style="background: rgba(3,7,18,0.8); padding: 1.2rem; border-radius: 8px; border: 1px solid rgba(6,182,212,0.3);">
-                            <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #9ca3af;"><strong>Correo Electrónico (Información No Sensible):</strong> <span style="color: #fff;"><?php echo htmlspecialchars($t_user['email']); ?></span></p>
                             <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #9ca3af;"><strong>Miembro desde:</strong> <span style="color: #fff;"><?php echo htmlspecialchars($t_user['created_at']); ?></span></p>
                             <p style="font-size: 0.9rem; color: #9ca3af;"><strong>Color Temático Preferido:</strong> <span style="color: <?php echo htmlspecialchars($t_user['theme_color']); ?>;"><?php echo htmlspecialchars($t_user['theme_color']); ?></span></p>
                         </div>
                     <?php else: ?>
-                        <div class="alert alert-error">El usuario solicitado no existe o fue eliminado del sistema.</div>
+                        <div class="alert alert-error">Acceso Restringido o Usuario No Encontrado (Error 403/404).</div>
                     <?php endif; ?>
                     <div style="margin-top: 1.5rem; text-align: center;">
                         <a href="?view=profile" class="btn btn-outline">Volver a Mi Panel</a>
@@ -1265,7 +1278,6 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
                     mediaRecorder.onstop = () => {
                         recordedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        // Enviar automáticamente el audio grabado como nota de voz
                         enviarAudioGrabado();
                     };
 
