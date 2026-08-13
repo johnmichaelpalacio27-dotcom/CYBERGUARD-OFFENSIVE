@@ -87,14 +87,15 @@ try {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
     
-    // Tabla para Chat en Vivo de Seguridad
+   // Tabla para Chat en Vivo de Seguridad Avanzado (Soporte Multimedia y IDOR)
     $db->exec("CREATE TABLE IF NOT EXISTS live_chat (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
-        message TEXT NOT NULL,
+        message TEXT DEFAULT '',
+        file_path TEXT DEFAULT NULL,
+        file_type TEXT DEFAULT 'text',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
-
     // Tabla para Archivos de Usuario (Subidas y Descargas)
     $db->exec("CREATE TABLE IF NOT EXISTS user_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,21 +302,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-              // Dentro del bloque 'login'
-if (!$auth_passed) {
-    register_failed_attempt('login');
-    
-    // Verificamos si acabamos de entrar en bloqueo
-    $key = 'bf_login';
-    if ($_SESSION[$key]['attempts'] >= 3) {
-        header("HTTP/1.1 403 Forbidden");
-        die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
-    }
+                if ($auth_passed) {
+                    reset_brute_force('login');
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['user_email'] = $user['email'];
+                    $_SESSION['user_nombre'] = $user['nombre'];
+                    header("Location: ?view=profile");
+                    exit;
+                }
+            }
 
-    $message = "Credenciales de acceso incorrectas.";
-    $message_type = "error";
-    $action = 'login';
-}
+            register_failed_attempt('login');
+            
+            // Verificamos si acabamos de entrar en bloqueo
+            $key = 'bf_login';
+            if ($_SESSION[$key]['attempts'] >= 3) {
+                header("HTTP/1.1 403 Forbidden");
+                die("<h1>403 Forbidden</h1><p>Has superado el límite de intentos. Acceso bloqueado.</p>");
+            }
+
+            $message = "Credenciales de acceso incorrectas.";
+            $message_type = "error";
+            $action = 'login';
         }
     } elseif ($form_action === 'recover_hash') {
         $lockout = check_brute_force('recover');
@@ -438,10 +446,10 @@ if (!$auth_passed) {
         
         $q1 = trim($_POST['sec_question_1']);
         $a1 = trim($_POST['sec_answer_1']);
-        $q2 = trim($_POST['sec_question_2']);
-        $a2 = trim($_POST['sec_answer_2']);
-        $q3 = trim($_POST['sec_question_3']);
-        $a3 = trim($_POST['sec_answer_3']);
+        $q2 = trim($_POST['sec_question_2'] ?? '');
+        $a2 = trim($_POST['sec_answer_2'] ?? '');
+        $q3 = trim($_POST['sec_question_3'] ?? '');
+        $a3 = trim($_POST['sec_answer_3'] ?? '');
         
         $profile_pic_path = null;
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK) {
@@ -709,6 +717,39 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <a href="?view=home" class="btn btn-outline transition-link">Volver al Inicio</a>
                     </div>
                 </div>
+            <?php elseif ($action === 'view_user_profile'): ?>
+                <?php 
+                // Vista pública del perfil de otro usuario (Vulnerable a IDOR intencional para pruebas con Burp Suite)
+                $target_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+                $stmt_target = $db->prepare("SELECT id, nombre, apellido, email, profile_pic, theme_color, created_at, role FROM users WHERE id = ?");
+                $stmt_target->execute([$target_id]);
+                $t_user = $stmt_target->fetch(PDO::FETCH_ASSOC);
+                ?>
+                <div class="glass-card" style="margin: 0 auto; width: 100%; max-width: 600px;">
+                    <div class="badge-status">Perfil Público de Usuario [IDOR Audit Ready]</div>
+                    <?php if ($t_user): ?>
+                        <div class="avatar-3d-box">
+                            <?php if (!empty($t_user['profile_pic']) && file_exists(__DIR__ . '/' . $t_user['profile_pic'])): ?>
+                                <img src="<?php echo htmlspecialchars($t_user['profile_pic']); ?>" style="width:100%; height:100%; object-fit:cover;" alt="Avatar">
+                            <?php else: ?>
+                                <?php echo strtoupper(substr($t_user['nombre'], 0, 1)); ?>
+                            <?php endif; ?>
+                        </div>
+                        <h2 style="font-family: 'Orbitron'; text-align: center; color: #fff;"><?php echo htmlspecialchars($t_user['nombre'] . ' ' . $t_user['apellido']); ?></h2>
+                        <p style="text-align: center; color: var(--theme-color); font-size: 0.9rem; margin-bottom: 1.5rem;">ID de Cuenta: #<?php echo htmlspecialchars($t_user['id']); ?> &bull; Rol: <?php echo htmlspecialchars($t_user['role']); ?></p>
+                        
+                        <div style="background: rgba(3,7,18,0.8); padding: 1.2rem; border-radius: 8px; border: 1px solid rgba(6,182,212,0.3);">
+                            <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #9ca3af;"><strong>Correo Electrónico (Información No Sensible):</strong> <span style="color: #fff;"><?php echo htmlspecialchars($t_user['email']); ?></span></p>
+                            <p style="font-size: 0.9rem; margin-bottom: 0.5rem; color: #9ca3af;"><strong>Miembro desde:</strong> <span style="color: #fff;"><?php echo htmlspecialchars($t_user['created_at']); ?></span></p>
+                            <p style="font-size: 0.9rem; color: #9ca3af;"><strong>Color Temático Preferido:</strong> <span style="color: <?php echo htmlspecialchars($t_user['theme_color']); ?>;"><?php echo htmlspecialchars($t_user['theme_color']); ?></span></p>
+                        </div>
+                    <?php else: ?>
+                        <div class="alert alert-error">El usuario solicitado no existe o fue eliminado del sistema.</div>
+                    <?php endif; ?>
+                    <div style="margin-top: 1.5rem; text-align: center;">
+                        <a href="?view=profile" class="btn btn-outline">Volver a Mi Panel</a>
+                    </div>
+                </div>
             <?php elseif ($action === 'consultation'): ?>
                 <div class="glass-card" style="margin: 0 auto; width: 100%;">
                     <div class="badge-status">Centro de Reportes</div>
@@ -759,11 +800,11 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         
                         <div class="form-group">
                             <label>Correo Electrónico</label>
-                           <input type="email" name="login_id" class="form-control" required placeholder="">
+                            <input type="email" name="login_id" class="form-control" required placeholder="">
                         </div>
                         <div class="form-group">
                             <label>Contraseña de Acceso</label>
-                           <input type="password" name="password" class="form-control" required placeholder="">
+                            <input type="password" name="password" class="form-control" required placeholder="">
                         </div>
                         <div class="form-group">
                             <label>Pregunta de Seguridad (Verificación)</label>
@@ -796,7 +837,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         <div style="display: flex; gap: 1rem;">
                             <div class="form-group" style="flex: 1;">
                                 <label>Nombre</label>
-                              <input type="text" name="nombre" class="form-control" required placeholder="">
+                                <input type="text" name="nombre" class="form-control" required placeholder="">
                             </div>
                             <div class="form-group" style="flex: 1;">
                                 <label>Apellido</label>
@@ -809,7 +850,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Contraseña Maestra</label>
-                           <input type="password" name="password" class="form-control" required>
+                            <input type="password" name="password" class="form-control" required>
                         </div>
                         <div class="form-group">
                             <label>Algoritmo de Hash de Recuperación</label>
@@ -825,7 +866,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Respuesta de Seguridad 1</label>
-                           <input type="text" name="sec_answer_1" class="form-control" required>
+                            <input type="text" name="sec_answer_1" class="form-control" required>
                         </div>
                         <input type="hidden" name="sec_question_2" value="">
                         <input type="hidden" name="sec_answer_2" value="">
@@ -1018,7 +1059,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             
                             <div class="form-group">
                                 <label>Nueva Contraseña (Opcional)</label>
-                               <input type="password" name="password" class="form-control">
+                                <input type="password" name="password" class="form-control">
                             </div>
 
                             <?php if ($logged_user['role'] === 'admin'): ?>
@@ -1060,16 +1101,46 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
 
                         <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 2rem 0;">
                         
-                        <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1rem;">Chat en Vivo de Seguridad</h3>
-                        <div id="chat-box" style="height:250px; overflow-y:auto; background:rgba(3, 7, 18, 0.6); border: 1px solid rgba(6, 182, 212, 0.2); padding:1rem; border-radius:8px; margin-bottom:1rem; font-size: 0.9rem;">
-                        </div>
-                        <div style="display: flex; gap: 10px;">
-                            <input type="text" id="chat-input" class="form-control">
-                            <button onclick="enviarMensaje()" class="btn btn-primary">Enviar</button>
+                        <h3 style="font-family: 'Orbitron'; color: var(--theme-color); margin-bottom: 1rem;">Chat en Vivo de Seguridad (Estilo WhatsApp)</h3>
+                        
+                        <!-- Contenedor de mensajes -->
+                        <div id="chat-box" style="height:280px; overflow-y:auto; background:rgba(3, 7, 18, 0.7); border: 1px solid rgba(6, 182, 212, 0.3); padding:1rem; border-radius:8px; margin-bottom:1rem; font-size: 0.9rem;">
                         </div>
 
+                        <!-- Barra de entrada estilo WhatsApp -->
+                        <form id="chat-form" onsubmit="enviarMensajeMultimedia(event)" style="display: flex; flex-direction: column; gap: 8px;">
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <!-- Selector de Emojis Rápidos -->
+                                <select id="emoji-picker" onchange="insertarEmoji(this)" class="form-control" style="width: 60px; padding: 0.4rem;">
+                                    <option value="">😀</option>
+                                    <option value="👍">👍</option>
+                                    <option value="🔥">🔥</option>
+                                    <option value="💻">💻</option>
+                                    <option value="⚠️">⚠️</option>
+                                    <option value="🔒">🔒</option>
+                                </select>
+
+                                <!-- Campo de Texto -->
+                                <input type="text" id="chat-input" name="message" class="form-control" placeholder="Escribe un mensaje..." style="flex: 1;">
+
+                                <!-- Botón Enviar -->
+                                <button type="submit" class="btn btn-primary" style="padding: 0.8rem 1.2rem;">Enviar</button>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px;">
+                                <!-- Adjuntar Foto o Documento -->
+                                <label style="cursor: pointer; color: var(--theme-color);">
+                                    📎 Adjuntar (Foto/Doc) <input type="file" id="media-file-input" name="media_file" style="display: none;" accept="image/*,.pdf,.doc,.docx">
+                                </label>
+
+                                <!-- Grabadora de Audio / Micrófono -->
+                                <div>
+                                    <button type="button" id="record-btn" onclick="toggleGrabarAudio()" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.3rem 0.6rem; border-color: #ef4444; color: #ef4444;">🎙️ Grabar Voz</button>
+                                    <span id="recording-status" style="margin-left: 5px; color: #ef4444; display: none;">Grabando...</span>
+                                </div>
+                            </div>
+                        </form>
                     </div>
-
                 </div>
             <?php endif; ?>
         </main>
@@ -1163,6 +1234,87 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
         if(document.getElementById('chat-box')) {
             setInterval(cargarChat, 3000);
             cargarChat();
+        }
+        function verPerfilUsuario(userId) {
+            window.location.href = '?view=view_user_profile&id=' + userId;
+        }
+
+        function insertarEmoji(selectObj) {
+            let input = document.getElementById('chat-input');
+            input.value += selectObj.value;
+            selectObj.value = "";
+        }
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordedAudioBlob = null;
+
+        async function toggleGrabarAudio() {
+            let recordBtn = document.getElementById('record-btn');
+            let statusSpan = document.getElementById('recording-status');
+
+            if (!mediaRecorder || mediaRecorder.state === "inactive") {
+                try {
+                    let stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        recordedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        // Enviar automáticamente el audio grabado como nota de voz
+                        enviarAudioGrabado();
+                    };
+
+                    mediaRecorder.start();
+                    recordBtn.style.background = "#ef4444";
+                    recordBtn.style.color = "#030712";
+                    statusSpan.style.display = "inline";
+                } catch (err) {
+                    alert("No se pudo acceder al micrófono.");
+                }
+            } else {
+                mediaRecorder.stop();
+                recordBtn.style.background = "transparent";
+                recordBtn.style.color = "#ef4444";
+                statusSpan.style.display = "none";
+            }
+        }
+
+        function enviarAudioGrabado() {
+            let formData = new FormData();
+            formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+            formData.append('media_file', recordedAudioBlob, 'nota_de_voz.webm');
+
+            fetch('chat_backend.php', { method: 'POST', body: formData })
+                .then(() => {
+                    recordedAudioBlob = null;
+                    cargarChat();
+                });
+        }
+
+        function enviarMensajeMultimedia(event) {
+            event.preventDefault();
+            let inputElem = document.getElementById('chat-input');
+            let fileInput = document.getElementById('media-file-input');
+            
+            let formData = new FormData();
+            formData.append('message', inputElem.value);
+            formData.append('csrf_token', '<?php echo $_SESSION['csrf_token']; ?>');
+            
+            if (fileInput.files.length > 0) {
+                formData.append('media_file', fileInput.files[0]);
+            }
+
+            fetch('chat_backend.php', { method: 'POST', body: formData })
+                .then(() => {
+                    inputElem.value = '';
+                    fileInput.value = '';
+                    cargarChat();
+                });
         }
     </script>
 </body>
