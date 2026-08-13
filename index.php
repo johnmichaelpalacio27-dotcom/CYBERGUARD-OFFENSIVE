@@ -667,7 +667,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                 <a href="?view=consultation" class="transition-link">Consulta de Ciberseguridad</a>
                 <?php if (isset($_SESSION['user_id'])): ?>
                     <a href="?view=profile" class="transition-link" style="color: var(--theme-color); font-weight: 600; display: flex; align-items: center;">
-                        Mi Perfil Blindado
+                        Mi Perfil 
                         <?php if (!empty($logged_user['profile_pic']) && file_exists(__DIR__ . '/' . $logged_user['profile_pic'])): ?>
                             <img src="<?php echo htmlspecialchars($logged_user['profile_pic']); ?>" class="nav-avatar" alt="Avatar">
                         <?php endif; ?>
@@ -732,7 +732,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                         </div>
                         <div class="form-group">
                             <label>Descripción Detallada del Incidente</label>
-                            <textarea name="message" class="form-control" rows="4" required placeholder="Describa el comportamiento observado..."></textarea>
+                            <textarea name="message" class="form-control" rows="4" required placeholder="Describa el comportamiento observado "></textarea>
                         </div>
                         <div class="form-group">
                             <label>Adjuntar Archivo de Soporte (PDF, Word)</label>
