@@ -1006,7 +1006,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <div class="form-group">
                                 <label>Fotografía de Perfil (Avatar)</label>
                                 <div class="file-upload-wrapper">
-                                    <span class="file-upload-text">[+] Seleccionar Imagen (JPG, PNG, WEBP)</span>
+                                    <span class="file-upload-text">[+] Seleccionar Imagen </span>
                                     <input type="file" name="profile_pic" accept=".jpg, .jpeg, .png, .webp">
                                 </div>
                             </div>
@@ -1057,7 +1057,7 @@ $active_theme_color = $logged_user['theme_color'] ?? '#06b6d4';
                             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px;">
                                 <!-- Adjuntar Foto o Documento -->
                                 <label style="cursor: pointer; color: var(--theme-color);">
-                                    📎 Adjuntar (Foto/Doc) <input type="file" id="media-file-input" name="media_file" style="display: none;" accept="image/*,.pdf,.doc,.docx">
+                                    [+] Adjuntar Imagen <input type="file" id="media-file-input" name="media_file" style="display: none;" accept="image/*,.pdf,.doc,.docx">
                                 </label>
 
                                 <!-- Grabadora de Audio / Micrófono -->
